@@ -28,9 +28,11 @@ contract WeightedRateMerklePool is Pool, WeightedInterestRateModel, MerkleCollat
      * @notice Pool constructor
      */
     constructor(
+        address collateralLiquidator_,
         address delegationRegistry_,
-        address[] memory collateralWrappers
-    ) Pool(delegationRegistry_, collateralWrappers) {
+        address[] memory collateralWrappers,
+        WeightedInterestRateModel.Parameters memory parameters
+    ) Pool(collateralLiquidator_, delegationRegistry_, collateralWrappers) WeightedInterestRateModel(parameters) {
         /* Disable initialization of implementation contract */
         _initialized = true;
     }
@@ -39,7 +41,7 @@ contract WeightedRateMerklePool is Pool, WeightedInterestRateModel, MerkleCollat
     /* Initializer */
     /**************************************************************************/
 
-    function initialize(bytes memory params, address collateralLiquidator_) external {
+    function initialize(bytes memory params) external {
         require(!_initialized, "Already initialized");
 
         _initialized = true;
@@ -50,21 +52,25 @@ contract WeightedRateMerklePool is Pool, WeightedInterestRateModel, MerkleCollat
             address currencyToken_,
             uint64[] memory durations_,
             uint64[] memory rates_,
-            WeightedInterestRateModel.Parameters memory rateParameters,
             bytes32 merkleRoot_,
             uint32 nodeCount_
-        ) = abi.decode(
-                params,
-                (address, address, uint64[], uint64[], WeightedInterestRateModel.Parameters, bytes32, uint32)
-            );
+        ) = abi.decode(params, (address, address, uint64[], uint64[], bytes32, uint32));
 
         /* Initialize Pool */
-        Pool._initialize(currencyToken_, collateralLiquidator_, durations_, rates_);
+        Pool._initialize(currencyToken_, durations_, rates_);
 
         /* Initialize Collateral Filter */
         MerkleCollateralFilter._initialize(collateralToken_, abi.encode(merkleRoot_, nodeCount_));
+    }
 
-        /* Initialize Interest Rate Model */
-        WeightedInterestRateModel._initialize(rateParameters);
+    /**************************************************************************/
+    /* Name */
+    /**************************************************************************/
+
+    /**
+     * @inheritdoc Pool
+     */
+    function IMPLEMENTATION_NAME() external pure override returns (string memory) {
+        return "WeightedRateMerklePool";
     }
 }
