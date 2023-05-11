@@ -1540,6 +1540,7 @@ describe("Pool Basic", function () {
       /* Extract loan receipt */
       const loanReceiptHash = (await extractEvent(borrowTx, pool, "LoanOriginated")).args.loanReceiptHash;
       const loanReceipt = (await extractEvent(borrowTx, pool, "LoanOriginated")).args.loanReceipt;
+      console.log("loanReceipt:", loanReceipt);
 
       /* Validate hash */
       expect(loanReceiptHash).to.equal(await loanReceiptLib.hash(loanReceipt));

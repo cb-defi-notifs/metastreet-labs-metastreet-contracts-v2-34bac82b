@@ -23,6 +23,10 @@ const config: HardhatUserConfig = {
     ],
   },
   networks: {
+    ethereum: {
+      url: process.env.ETHEREUM_URL || "",
+      accounts: process.env.PRIVATE_KEY_LIQUIDATOR !== undefined ? [process.env.PRIVATE_KEY_LIQUIDATOR] : [],
+    },
     goerli: {
       url: process.env.GOERLI_URL || "",
       accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
