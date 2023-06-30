@@ -10,6 +10,56 @@ interface ILiquidity {
     /**************************************************************************/
 
     /**
+     * @notice Fulfilled redemption
+     * @param shares Shares redeemed
+     * @param amount Amount redeemed
+     */
+    struct FulfilledRedemption {
+        uint128 shares;
+        uint128 amount;
+    }
+
+    /**
+     * @notice Redemption state
+     * @param pending Pending shares
+     * @param index Current index
+     * @param fulfilled Fulfilled redemptions
+     */
+    struct Redemptions {
+        uint128 pending;
+        uint128 index;
+        mapping(uint128 => FulfilledRedemption) fulfilled;
+    }
+
+    /**
+     * @notice Liquidity node
+     * @param value Liquidity value
+     * @param shares Liquidity shares outstanding
+     * @param available Liquidity available
+     * @param pending Liquidity pending (with interest)
+     * @param redemption Redemption state
+     * @param prev Previous liquidity node
+     * @param next Next liquidity node
+     */
+    struct Node {
+        uint128 value;
+        uint128 shares;
+        uint128 available;
+        uint128 pending;
+        uint128 prev;
+        uint128 next;
+        Redemptions redemptions;
+    }
+
+    /**
+     * @notice Liquidity state
+     * @param nodes Liquidity nodes
+     */
+    struct Liquidity {
+        mapping(uint256 => Node) nodes;
+    }
+
+    /**
      * @notice Node source
      * @param tick Tick
      * @param used Amount used
