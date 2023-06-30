@@ -12,6 +12,7 @@ import {
   TestDelegationRegistry,
   ExternalCollateralLiquidator,
   Pool,
+  LiquidityNodes,
 } from "../typechain";
 
 import { extractEvent, expectEvent } from "./helpers/EventUtilities";
@@ -26,6 +27,7 @@ describe("Pool Basic", function () {
   let collateralLiquidator: ExternalCollateralLiquidator;
   let poolImpl: Pool;
   let pool: Pool;
+  let liquidityNodesLib: LiquidityNodes;
   let snapshotId: string;
   let accountDepositors: SignerWithAddress[3];
   let accountBorrower: SignerWithAddress;
@@ -39,10 +41,10 @@ describe("Pool Basic", function () {
     const testERC20Factory = await ethers.getContractFactory("TestERC20");
     const testERC721Factory = await ethers.getContractFactory("TestERC721");
     const testLoanReceiptFactory = await ethers.getContractFactory("TestLoanReceipt");
+    const liquidityNodesFactory = await ethers.getContractFactory("LiquidityNodes");
     const testProxyFactory = await ethers.getContractFactory("TestProxy");
     const externalCollateralLiquidatorFactory = await ethers.getContractFactory("ExternalCollateralLiquidator");
     const delegationRegistryFactory = await ethers.getContractFactory("TestDelegationRegistry");
-    const poolImplFactory = await ethers.getContractFactory("WeightedRateCollectionPool");
 
     /* Deploy test currency token */
     tok1 = (await testERC20Factory.deploy("Token 1", "TOK1", 18, ethers.utils.parseEther("10000"))) as TestERC20;
@@ -55,6 +57,14 @@ describe("Pool Basic", function () {
     /* Deploy loan receipt library */
     loanReceiptLib = await testLoanReceiptFactory.deploy();
     await loanReceiptLib.deployed();
+
+    /* Deploy loan receipt library */
+    liquidityNodesLib = await liquidityNodesFactory.deploy();
+    await liquidityNodesLib.deployed();
+
+    const poolImplFactory = await ethers.getContractFactory("WeightedRateCollectionPool", {
+      libraries: { LiquidityNodes: liquidityNodesLib.address },
+    });
 
     /* Deploy external collateral liquidator implementation */
     const collateralLiquidatorImpl = await externalCollateralLiquidatorFactory.deploy();

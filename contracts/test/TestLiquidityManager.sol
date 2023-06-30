@@ -3,13 +3,15 @@ pragma solidity 0.8.19;
 
 import "../interfaces/ILiquidity.sol";
 import "../LiquidityManager.sol";
+import "../LiquidityNodes.sol";
 
 /**
  * @title Test Contract Wrapper for LiquidityManager
  * @author MetaStreet Labs
  */
 contract TestLiquidityManager is ILiquidity {
-    using LiquidityManager for LiquidityManager.Liquidity;
+    using LiquidityManager for ILiquidity.Liquidity;
+    using LiquidityNodes for ILiquidity.Liquidity;
 
     /**************************************************************************/
     /* Events */
@@ -35,7 +37,7 @@ contract TestLiquidityManager is ILiquidity {
     /**
      * @notice Liquidity
      */
-    LiquidityManager.Liquidity internal _liquidity;
+    ILiquidity.Liquidity internal _liquidity;
 
     /**************************************************************************/
     /* Constructor */
@@ -43,24 +45,6 @@ contract TestLiquidityManager is ILiquidity {
 
     constructor() {
         _liquidity.initialize();
-    }
-
-    /**************************************************************************/
-    /* ILiquidity Getters */
-    /**************************************************************************/
-
-    /**
-     * @inheritdoc ILiquidity
-     */
-    function liquidityNodes(uint128 startTick, uint128 endTick) external view returns (ILiquidity.NodeInfo[] memory) {
-        return _liquidity.liquidityNodes(startTick, endTick);
-    }
-
-    /**
-     * @inheritdoc ILiquidity
-     */
-    function liquidityNode(uint128 tick) external view returns (ILiquidity.NodeInfo memory) {
-        return _liquidity.liquidityNode(tick);
     }
 
     /**************************************************************************/
@@ -128,5 +112,23 @@ contract TestLiquidityManager is ILiquidity {
         uint256 durationIndex
     ) external view returns (ILiquidity.NodeSource[] memory, uint16 count) {
         return _liquidity.source(amount, ticks, multiplier, durationIndex);
+    }
+
+    /**************************************************************************/
+    /* ILiquidity Getters */
+    /**************************************************************************/
+
+    /**
+     * @inheritdoc ILiquidity
+     */
+    function liquidityNodes(uint128 startTick, uint128 endTick) external view returns (NodeInfo[] memory) {
+        return _liquidity.liquidityNodes(startTick, endTick);
+    }
+
+    /**
+     * @inheritdoc ILiquidity
+     */
+    function liquidityNode(uint128 tick) external view returns (NodeInfo memory) {
+        return _liquidity.liquidityNode(tick);
     }
 }
