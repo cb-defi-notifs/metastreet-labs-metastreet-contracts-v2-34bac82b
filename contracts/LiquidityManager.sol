@@ -58,134 +58,8 @@ library LiquidityManager {
     error InsufficientTickSpacing();
 
     /**************************************************************************/
-    /* Structures */
-    /**************************************************************************/
-
-    /**
-     * @notice Fulfilled redemption
-     * @param shares Shares redeemed
-     * @param amount Amount redeemed
-     */
-    struct FulfilledRedemption {
-        uint128 shares;
-        uint128 amount;
-    }
-
-    /**
-     * @notice Redemption state
-     * @param pending Pending shares
-     * @param index Current index
-     * @param fulfilled Fulfilled redemptions
-     */
-    struct Redemptions {
-        uint128 pending;
-        uint128 index;
-        mapping(uint128 => FulfilledRedemption) fulfilled;
-    }
-
-    /**
-     * @notice Liquidity node
-     * @param value Liquidity value
-     * @param shares Liquidity shares outstanding
-     * @param available Liquidity available
-     * @param pending Liquidity pending (with interest)
-     * @param redemption Redemption state
-     * @param prev Previous liquidity node
-     * @param next Next liquidity node
-     */
-    struct Node {
-        uint128 value;
-        uint128 shares;
-        uint128 available;
-        uint128 pending;
-        uint128 prev;
-        uint128 next;
-        Redemptions redemptions;
-    }
-
-    /**
-     * @notice Liquidity state
-     * @param nodes Liquidity nodes
-     */
-    struct Liquidity {
-        mapping(uint256 => Node) nodes;
-    }
-
-    /**************************************************************************/
     /* Getters */
     /**************************************************************************/
-
-    /**
-     * Get liquidity node at tick
-     * @param liquidity Liquidity state
-     * @param tick Tick
-     * @return Liquidity node
-     */
-    function liquidityNode(
-        Liquidity storage liquidity,
-        uint128 tick
-    ) internal view returns (ILiquidity.NodeInfo memory) {
-        Node storage node = liquidity.nodes[tick];
-
-        return
-            ILiquidity.NodeInfo({
-                tick: tick,
-                value: node.value,
-                shares: node.shares,
-                available: node.available,
-                pending: node.pending,
-                redemptions: node.redemptions.pending,
-                prev: node.prev,
-                next: node.next
-            });
-    }
-
-    /**
-     * Get liquidity nodes spanning [startTick, endTick] range where startTick
-     * must be 0 or an instantiated tick
-     * @param startTick Start tick
-     * @param endTick End tick
-     * @return Liquidity nodes
-     */
-    function liquidityNodes(
-        Liquidity storage liquidity,
-        uint128 startTick,
-        uint128 endTick
-    ) internal view returns (ILiquidity.NodeInfo[] memory) {
-        /* Validate start tick has active liquidity */
-        if (liquidity.nodes[startTick].next == 0) revert InactiveLiquidity();
-
-        /* Count nodes first to figure out how to size liquidity nodes array */
-        uint256 i = 0;
-        uint128 t = startTick;
-        while (t != type(uint128).max && t <= endTick) {
-            Node storage node = liquidity.nodes[t];
-            i++;
-            t = node.next;
-        }
-
-        ILiquidity.NodeInfo[] memory nodes = new ILiquidity.NodeInfo[](i);
-
-        /* Populate nodes */
-        i = 0;
-        t = startTick;
-        while (t != type(uint128).max && t <= endTick) {
-            Node storage node = liquidity.nodes[t];
-            nodes[i++] = ILiquidity.NodeInfo({
-                tick: t,
-                value: node.value,
-                shares: node.shares,
-                available: node.available,
-                pending: node.pending,
-                redemptions: node.redemptions.pending,
-                prev: node.prev,
-                next: node.next
-            });
-            t = node.next;
-        }
-
-        return nodes;
-    }
 
     /**
      * @notice Get redemption available amount
@@ -197,13 +71,13 @@ library LiquidityManager {
      * @return Redeemed shares, redeemed amount
      */
     function redemptionAvailable(
-        Liquidity storage liquidity,
+        ILiquidity.Liquidity storage liquidity,
         uint128 tick,
         uint128 pending,
         uint128 index,
         uint128 target
     ) internal view returns (uint128, uint128) {
-        Node storage node = liquidity.nodes[tick];
+        ILiquidity.Node storage node = liquidity.nodes[tick];
 
         uint128 processedShares = 0;
         uint128 totalRedeemedShares = 0;
@@ -211,7 +85,7 @@ library LiquidityManager {
 
         for (; processedShares < target + pending; index++) {
             /* Look up the next fulfilled redemption */
-            FulfilledRedemption storage redemption = node.redemptions.fulfilled[index];
+            ILiquidity.FulfilledRedemption storage redemption = node.redemptions.fulfilled[index];
             if (index == node.redemptions.index) {
                 /* Reached pending unfulfilled redemption */
                 break;
@@ -256,7 +130,7 @@ library LiquidityManager {
      * @param node Liquidity node
      * @return True if empty, otherwise false
      */
-    function _isEmpty(Node storage node) internal view returns (bool) {
+    function _isEmpty(ILiquidity.Node storage node) internal view returns (bool) {
         return node.value == 0 && node.shares == 0 && node.available == 0 && node.pending == 0;
     }
 
@@ -265,7 +139,7 @@ library LiquidityManager {
      * @param node Liquidity node
      * @return True if active, otherwise false
      */
-    function _isActive(Node storage node) internal view returns (bool) {
+    function _isActive(ILiquidity.Node storage node) internal view returns (bool) {
         return node.prev != 0 || node.next != 0;
     }
 
@@ -274,7 +148,7 @@ library LiquidityManager {
      * @param node Liquidity node
      * @return True if impaired, otherwise false
      */
-    function _isImpaired(Node storage node) internal view returns (bool) {
+    function _isImpaired(ILiquidity.Node storage node) internal view returns (bool) {
         /* If there's shares, but insufficient value for a stable share price */
         return node.shares != 0 && node.value * FIXED_POINT_SCALE < node.shares * IMPAIRED_PRICE_THRESHOLD;
     }
@@ -284,7 +158,7 @@ library LiquidityManager {
      * @param liquidity Liquidity state
      * @param tick Tick
      */
-    function _instantiate(Liquidity storage liquidity, Node storage node, uint128 tick) internal {
+    function _instantiate(ILiquidity.Liquidity storage liquidity, ILiquidity.Node storage node, uint128 tick) internal {
         /* If node is active, do nothing */
         if (_isActive(node)) return;
         /* If node is inactive and not empty, revert */
@@ -292,7 +166,7 @@ library LiquidityManager {
 
         /* Find prior node to new tick */
         uint128 prevTick = 0;
-        Node storage prevNode = liquidity.nodes[prevTick];
+        ILiquidity.Node storage prevNode = liquidity.nodes[prevTick];
         while (prevNode.next < tick) {
             prevTick = prevNode.next;
             prevNode = liquidity.nodes[prevTick];
@@ -326,7 +200,7 @@ library LiquidityManager {
      * @param liquidity Liquidity state
      * @param node Liquidity node
      */
-    function _garbageCollect(Liquidity storage liquidity, Node storage node) internal {
+    function _garbageCollect(ILiquidity.Liquidity storage liquidity, ILiquidity.Node storage node) internal {
         /* If node is not impaired and not empty, or already inactive, do nothing */
         if ((!_isImpaired(node) && !_isEmpty(node)) || !_isActive(node)) return;
 
@@ -342,7 +216,7 @@ library LiquidityManager {
      * @param liquidity Liquidity state
      * @param node Liquidity node
      */
-    function _processRedemptions(Liquidity storage liquidity, Node storage node) internal {
+    function _processRedemptions(ILiquidity.Liquidity storage liquidity, ILiquidity.Node storage node) internal {
         /* If there's no pending shares to redeem */
         if (node.redemptions.pending == 0) return;
 
@@ -357,7 +231,10 @@ library LiquidityManager {
             uint128 shares = node.redemptions.pending;
 
             /* Record fulfilled redemption */
-            node.redemptions.fulfilled[node.redemptions.index++] = FulfilledRedemption({shares: shares, amount: 0});
+            node.redemptions.fulfilled[node.redemptions.index++] = ILiquidity.FulfilledRedemption({
+                shares: shares,
+                amount: 0
+            });
 
             /* Update node state */
             node.shares -= shares;
@@ -381,7 +258,7 @@ library LiquidityManager {
             if (shares == 0) return;
 
             /* Record fulfilled redemption */
-            node.redemptions.fulfilled[node.redemptions.index++] = FulfilledRedemption({
+            node.redemptions.fulfilled[node.redemptions.index++] = ILiquidity.FulfilledRedemption({
                 shares: shares,
                 amount: amount
             });
@@ -407,7 +284,7 @@ library LiquidityManager {
      * @notice Initialize liquidity state
      * @param liquidity Liquidity state
      */
-    function initialize(Liquidity storage liquidity) internal {
+    function initialize(ILiquidity.Liquidity storage liquidity) internal {
         /* Liquidity state defaults to zero, but need to make head and tail nodes */
         liquidity.nodes[0].next = type(uint128).max;
         liquidity.nodes[type(uint128).max].prev = 0;
@@ -420,8 +297,8 @@ library LiquidityManager {
      * @param amount Amount
      * @return Number of shares
      */
-    function deposit(Liquidity storage liquidity, uint128 tick, uint128 amount) internal returns (uint128) {
-        Node storage node = liquidity.nodes[tick];
+    function deposit(ILiquidity.Liquidity storage liquidity, uint128 tick, uint128 amount) internal returns (uint128) {
+        ILiquidity.Node storage node = liquidity.nodes[tick];
 
         /* If tick is reserved */
         if (_isReserved(tick)) revert InactiveLiquidity();
@@ -452,8 +329,8 @@ library LiquidityManager {
      * @param used Used amount
      * @param pending Pending Amount
      */
-    function use(Liquidity storage liquidity, uint128 tick, uint128 used, uint128 pending) internal {
-        Node storage node = liquidity.nodes[tick];
+    function use(ILiquidity.Liquidity storage liquidity, uint128 tick, uint128 used, uint128 pending) internal {
+        ILiquidity.Node storage node = liquidity.nodes[tick];
 
         node.available -= used;
         node.pending += pending;
@@ -468,13 +345,13 @@ library LiquidityManager {
      * @param restored Restored amount
      */
     function restore(
-        Liquidity storage liquidity,
+        ILiquidity.Liquidity storage liquidity,
         uint128 tick,
         uint128 used,
         uint128 pending,
         uint128 restored
     ) internal {
-        Node storage node = liquidity.nodes[tick];
+        ILiquidity.Node storage node = liquidity.nodes[tick];
 
         node.value = node.value - used + restored;
         node.available += restored;
@@ -494,8 +371,12 @@ library LiquidityManager {
      * @param shares Shares
      * @return Redemption index, Redemption target
      */
-    function redeem(Liquidity storage liquidity, uint128 tick, uint128 shares) internal returns (uint128, uint128) {
-        Node storage node = liquidity.nodes[tick];
+    function redeem(
+        ILiquidity.Liquidity storage liquidity,
+        uint128 tick,
+        uint128 shares
+    ) internal returns (uint128, uint128) {
+        ILiquidity.Node storage node = liquidity.nodes[tick];
 
         /* Redemption from inactive liquidity nodes is allowed to facilitate
          * restoring garbage collected nodes */
@@ -509,7 +390,10 @@ library LiquidityManager {
 
         /* Initialize redemption record to save gas in loan callbacks */
         if (node.redemptions.fulfilled[redemptionIndex].shares != type(uint128).max) {
-            node.redemptions.fulfilled[redemptionIndex] = FulfilledRedemption({shares: type(uint128).max, amount: 0});
+            node.redemptions.fulfilled[redemptionIndex] = ILiquidity.FulfilledRedemption({
+                shares: type(uint128).max,
+                amount: 0
+            });
         }
 
         /* Process any pending redemptions from available cash */
@@ -528,7 +412,7 @@ library LiquidityManager {
      * @return Sourced liquidity nodes, count of nodes
      */
     function source(
-        Liquidity storage liquidity,
+        ILiquidity.Liquidity storage liquidity,
         uint256 amount,
         uint128[] calldata ticks,
         uint256 multiplier,
@@ -546,7 +430,7 @@ library LiquidityManager {
             uint256 limit = Tick.validate(tick, prevTick, durationIndex);
 
             /* Look up liquidity node */
-            Node storage node = liquidity.nodes[tick];
+            ILiquidity.Node storage node = liquidity.nodes[tick];
 
             /* Consume as much as possible up to the tick limit, amount available, and amount remaining */
             uint128 take = uint128(Math.min(Math.min(limit * multiplier - taken, node.available), amount - taken));
