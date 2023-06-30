@@ -14,6 +14,7 @@ import "./LoanReceipt.sol";
 import "./LiquidityManager.sol";
 import "./CollateralFilter.sol";
 import "./InterestRateModel.sol";
+import "./Delegate.sol";
 
 import "./interfaces/IPool.sol";
 import "./interfaces/ILiquidity.sol";
@@ -41,6 +42,7 @@ abstract contract Pool is
     using SafeERC20 for IERC20;
     using LoanReceipt for LoanReceipt.LoanReceiptV1;
     using LiquidityManager for LiquidityManager.Liquidity;
+    using Delegate for IDelegationRegistry;
 
     /**************************************************************************/
     /* Constants */
@@ -469,48 +471,6 @@ abstract contract Pool is
     }
 
     /**
-     * @notice Helper function that calls delegate.cash registry to delegate
-     * token
-     * @param collateralToken Collateral token
-     * @param collateralTokenId Collateral token ID
-     * @param options Options data
-     */
-    function _optionDelegateCash(address collateralToken, uint256 collateralTokenId, bytes calldata options) internal {
-        /* Find delegate.cash tagged data in options */
-        bytes calldata delegateData = _getOptionsData(options, uint16(BorrowOptions.DelegateCash));
-
-        if (delegateData.length != 0) {
-            if (address(_delegationRegistry) == address(0)) revert InvalidBorrowOptions();
-            if (delegateData.length != 20) revert InvalidBorrowOptions();
-
-            address delegate = address(uint160(bytes20(delegateData)));
-            _delegationRegistry.delegateForToken(delegate, collateralToken, collateralTokenId, true);
-        }
-    }
-
-    /**
-     * @dev Helper function to revoke token delegate
-     * @param collateralToken Contract address of token that delegation is being removed from
-     * @param collateralTokenId Token id of token that delegation is being removed from
-     */
-    function _revokeDelegates(address collateralToken, uint256 collateralTokenId) internal {
-        /* No operation if _delegationRegistry not set */
-        if (address(_delegationRegistry) == address(0)) return;
-
-        /* Get delegates for collateral token and id */
-        address[] memory delegates = _delegationRegistry.getDelegatesForToken(
-            address(this),
-            collateralToken,
-            collateralTokenId
-        );
-
-        for (uint256 i; i < delegates.length; i++) {
-            /* Revoke by setting value to false */
-            _delegationRegistry.delegateForToken(delegates[i], collateralToken, collateralTokenId, false);
-        }
-    }
-
-    /**
      * @dev Helper function to quote a loan
      * @param principal Principal amount in currency tokens
      * @param duration Duration in seconds
@@ -827,7 +787,11 @@ abstract contract Pool is
         );
 
         /* Handle delegate.cash option */
-        _optionDelegateCash(collateralToken, collateralTokenId, options);
+        _delegationRegistry.optionDelegateCash(
+            collateralToken,
+            collateralTokenId,
+            _getOptionsData(options, uint16(BorrowOptions.DelegateCash))
+        );
 
         /* Transfer collateral from borrower to pool */
         IERC721(collateralToken).transferFrom(msg.sender, address(this), collateralTokenId);
@@ -851,7 +815,7 @@ abstract contract Pool is
         );
 
         /* Revoke delegates */
-        _revokeDelegates(loanReceipt.collateralToken, loanReceipt.collateralTokenId);
+        _delegationRegistry.revokeDelegates(loanReceipt.collateralToken, loanReceipt.collateralTokenId);
 
         /* Transfer repayment from borrower to pool */
         _currencyToken.safeTransferFrom(loanReceipt.borrower, address(this), repayment);
@@ -937,7 +901,7 @@ abstract contract Pool is
         _loans[loanReceiptHash] = LoanStatus.Liquidated;
 
         /* Revoke delegates */
-        _revokeDelegates(loanReceipt.collateralToken, loanReceipt.collateralTokenId);
+        _delegationRegistry.revokeDelegates(loanReceipt.collateralToken, loanReceipt.collateralTokenId);
 
         /* Start liquidation with collateral liquidator */
         _collateralLiquidator.liquidate(
