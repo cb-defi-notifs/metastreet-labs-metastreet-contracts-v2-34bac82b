@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import "./LoanReceipt.sol";
 import "./LiquidityManager.sol";
+import "./LiquidityNodes.sol";
 import "./CollateralFilter.sol";
 import "./InterestRateModel.sol";
 
@@ -40,7 +41,8 @@ abstract contract Pool is
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
     using LoanReceipt for LoanReceipt.LoanReceiptV1;
-    using LiquidityManager for LiquidityManager.Liquidity;
+    using LiquidityManager for ILiquidity.Liquidity;
+    using LiquidityNodes for ILiquidity.Liquidity;
 
     /**************************************************************************/
     /* Constants */
@@ -187,7 +189,7 @@ abstract contract Pool is
     /**
      * @notice Liquidity
      */
-    LiquidityManager.Liquidity internal _liquidity;
+    ILiquidity.Liquidity internal _liquidity;
 
     /**
      * @notice Mapping of account to tick to deposit
