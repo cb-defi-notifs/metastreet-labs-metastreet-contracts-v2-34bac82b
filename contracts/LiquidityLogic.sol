@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -8,10 +8,26 @@ import "./interfaces/ILiquidity.sol";
 import "./Tick.sol";
 
 /**
- * @title LiquidityManager
+ * @title Liquidity Logic
  * @author MetaStreet Labs
  */
-library LiquidityManager {
+library LiquidityLogic {
+    /*
+     * Liquidity nodes are arranged in a linked-list that starts with a zero
+     * sentinel and ends with an end sentinel. There are two types of ticks, namely,
+     * ratio ticks and absolute ticks (see more in Tick.sol). In the linked-list,
+     * ratio ticks are ordered before absolute ticks. Within the types, they are
+     * ordered in ascending order of their tick values.
+     *
+     * +--------------------------------------------------------------------+
+     * |                         Linked-List Layout                         |
+     * +----------------------------------|------------------|--------------+
+     * |       0       | (Limit Type = 1) | (Limit Type = 0) | Max. uint128 |
+     * | Zero Sentinel |   Ratio Ticks    |  Absolute Ticks  | End Sentinel |
+     * +--------------------------------------------------------------------+
+     *
+     */
+
     using SafeCast for uint256;
 
     /**************************************************************************/
@@ -19,9 +35,14 @@ library LiquidityManager {
     /**************************************************************************/
 
     /**
-     * @notice Tick limit spacing basis points (10%)
+     * @notice Tick limit spacing basis points for absolute type (10%)
      */
-    uint256 internal constant TICK_LIMIT_SPACING_BASIS_POINTS = 1000;
+    uint256 internal constant ABSOLUTE_TICK_LIMIT_SPACING_BASIS_POINTS = 1000;
+
+    /**
+     * @notice Tick limit spacing basis points for ratio type (5%)
+     */
+    uint256 internal constant RATIO_TICK_LIMIT_SPACING_BASIS_POINTS = 500;
 
     /**
      * @notice Fixed point scale
@@ -38,28 +59,36 @@ library LiquidityManager {
      */
     uint256 internal constant IMPAIRED_PRICE_THRESHOLD = 0.05 * 1e18;
 
-    /**************************************************************************/
-    /* Errors */
-    /**************************************************************************/
+    /**
+     * @notice Max ticks used count
+     */
+    uint256 private constant MAX_TICKS_USED_COUNT = 32;
 
     /**
-     * @notice Insufficient liquidity
+     * @notice Max redemption queue scan count
      */
-    error InsufficientLiquidity();
+    uint256 private constant MAX_REDEMPTION_QUEUE_SCAN_COUNT = 150;
 
     /**
-     * @notice Inactive liquidity
+     * @notice Amount of shares to lock for initial deposit
      */
-    error InactiveLiquidity();
-
-    /**
-     * @notice Insufficient tick spacing
-     */
-    error InsufficientTickSpacing();
+    uint128 private constant LOCKED_SHARES = 1e6;
 
     /**************************************************************************/
     /* Structures */
     /**************************************************************************/
+
+    /**
+     * @notice Node source
+     * @param tick Tick
+     * @param used Amount used
+     * @param pending Amount pending
+     */
+    struct NodeSource {
+        uint128 tick;
+        uint128 used;
+        uint128 pending;
+    }
 
     /**
      * @notice Fulfilled redemption
@@ -84,14 +113,27 @@ library LiquidityManager {
     }
 
     /**
+     * @notice Accrual state
+     * @param accrued Accrued interest
+     * @param rate Accrual rate
+     * @param timestamp Last accrual timestamp
+     */
+    struct Accrual {
+        uint128 accrued;
+        uint64 rate;
+        uint64 timestamp;
+    }
+
+    /**
      * @notice Liquidity node
      * @param value Liquidity value
      * @param shares Liquidity shares outstanding
      * @param available Liquidity available
      * @param pending Liquidity pending (with interest)
-     * @param redemption Redemption state
      * @param prev Previous liquidity node
      * @param next Next liquidity node
+     * @param redemption Redemption state
+     * @param accrual Accrual state
      */
     struct Node {
         uint128 value;
@@ -101,6 +143,7 @@ library LiquidityManager {
         uint128 prev;
         uint128 next;
         Redemptions redemptions;
+        Accrual accrual;
     }
 
     /**
@@ -121,10 +164,7 @@ library LiquidityManager {
      * @param tick Tick
      * @return Liquidity node
      */
-    function liquidityNode(
-        Liquidity storage liquidity,
-        uint128 tick
-    ) internal view returns (ILiquidity.NodeInfo memory) {
+    function liquidityNode(Liquidity storage liquidity, uint128 tick) public view returns (ILiquidity.NodeInfo memory) {
         Node storage node = liquidity.nodes[tick];
 
         return
@@ -141,8 +181,33 @@ library LiquidityManager {
     }
 
     /**
-     * Get liquidity nodes spanning [startTick, endTick] range where startTick
-     * must be 0 or an instantiated tick
+     * @notice Count liquidity nodes spanning [startTick, endTick] range, where
+     * startTick is 0 or an instantiated tick
+     * @param liquidity Liquidity state
+     * @param startTick Start tick
+     * @param endTick End tick
+     * @return count Liquidity nodes count
+     */
+    function liquidityNodesCount(
+        Liquidity storage liquidity,
+        uint128 startTick,
+        uint128 endTick
+    ) public view returns (uint256 count) {
+        /* Validate start tick has active liquidity */
+        if (liquidity.nodes[startTick].next == 0) revert ILiquidity.InactiveLiquidity();
+
+        /* Count nodes */
+        uint256 t = startTick;
+        while (t != type(uint128).max && t <= endTick) {
+            t = liquidity.nodes[t].next;
+            count++;
+        }
+    }
+
+    /**
+     * @notice Get liquidity nodes spanning [startTick, endTick] range, where
+     * startTick is 0 or an instantiated tick
+     * @param liquidity Liquidity state
      * @param startTick Start tick
      * @param endTick End tick
      * @return Liquidity nodes
@@ -151,30 +216,51 @@ library LiquidityManager {
         Liquidity storage liquidity,
         uint128 startTick,
         uint128 endTick
-    ) internal view returns (ILiquidity.NodeInfo[] memory) {
-        /* Validate start tick has active liquidity */
-        if (liquidity.nodes[startTick].next == 0) revert InactiveLiquidity();
+    ) external view returns (ILiquidity.NodeInfo[] memory) {
+        ILiquidity.NodeInfo[] memory nodes = new ILiquidity.NodeInfo[](
+            liquidityNodesCount(liquidity, startTick, endTick)
+        );
 
-        /* Count nodes first to figure out how to size liquidity nodes array */
+        /* Populate nodes */
         uint256 i;
         uint128 t = startTick;
         while (t != type(uint128).max && t <= endTick) {
-            t = liquidity.nodes[t].next;
-            i++;
-        }
-
-        ILiquidity.NodeInfo[] memory nodes = new ILiquidity.NodeInfo[](i);
-
-        /* Populate nodes */
-        i = 0;
-        t = startTick;
-        while (t != type(uint128).max && t <= endTick) {
             nodes[i] = liquidityNode(liquidity, t);
-            t = nodes[i].next;
-            i++;
+            t = nodes[i++].next;
         }
 
         return nodes;
+    }
+
+    /**
+     * @notice Get liquidity node with accrual info at tick
+     * @param liquidity Liquidity state
+     * @param tick Tick
+     * @return Liquidity node, Accrual info
+     */
+    function liquidityNodeWithAccrual(
+        Liquidity storage liquidity,
+        uint128 tick
+    ) external view returns (ILiquidity.NodeInfo memory, ILiquidity.AccrualInfo memory) {
+        Node storage node = liquidity.nodes[tick];
+
+        return (
+            ILiquidity.NodeInfo({
+                tick: tick,
+                value: node.value,
+                shares: node.shares,
+                available: node.available,
+                pending: node.pending,
+                redemptions: node.redemptions.pending,
+                prev: node.prev,
+                next: node.next
+            }),
+            ILiquidity.AccrualInfo({
+                accrued: node.accrual.accrued,
+                rate: node.accrual.rate,
+                timestamp: node.accrual.timestamp
+            })
+        );
     }
 
     /**
@@ -184,7 +270,10 @@ library LiquidityManager {
      * @param pending Redemption pending
      * @param index Redemption index
      * @param target Redemption target
-     * @return Redeemed shares, redeemed amount
+     * @return redeemedShares Redeemed shares
+     * @return redeemedAmount Redeemed amount
+     * @return processedIndices Processed indices
+     * @return processedShares Processed shares
      */
     function redemptionAvailable(
         Liquidity storage liquidity,
@@ -192,21 +281,28 @@ library LiquidityManager {
         uint128 pending,
         uint128 index,
         uint128 target
-    ) internal view returns (uint128, uint128) {
+    )
+        internal
+        view
+        returns (uint128 redeemedShares, uint128 redeemedAmount, uint128 processedIndices, uint128 processedShares)
+    {
         Node storage node = liquidity.nodes[tick];
 
-        uint128 totalRedeemedShares;
-        uint128 totalRedeemedAmount;
+        uint256 stopIndex = index + MAX_REDEMPTION_QUEUE_SCAN_COUNT;
 
-        for (uint128 processedShares; processedShares < target + pending; index++) {
-            /* Look up the next fulfilled redemption */
-            FulfilledRedemption storage redemption = node.redemptions.fulfilled[index];
+        for (; processedShares < target + pending && index < stopIndex; index++) {
             if (index == node.redemptions.index) {
                 /* Reached pending unfulfilled redemption */
                 break;
             }
 
+            /* Look up the next fulfilled redemption */
+            FulfilledRedemption storage redemption = node.redemptions.fulfilled[index];
+
+            /* Update processed count */
+            processedIndices += 1;
             processedShares += redemption.shares;
+
             if (processedShares <= target) {
                 /* Have not reached the redemption queue position yet */
                 continue;
@@ -214,17 +310,50 @@ library LiquidityManager {
                 /* Compute number of shares to redeem in range of this
                  * redemption batch */
                 uint128 shares = (((processedShares > target + pending) ? pending : (processedShares - target))) -
-                    totalRedeemedShares;
+                    redeemedShares;
                 /* Compute price of shares in this redemption batch */
                 uint256 price = (redemption.amount * FIXED_POINT_SCALE) / redemption.shares;
 
                 /* Accumulate redeemed shares and corresponding amount */
-                totalRedeemedShares += shares;
-                totalRedeemedAmount += Math.mulDiv(shares, price, FIXED_POINT_SCALE).toUint128();
+                redeemedShares += shares;
+                redeemedAmount += Math.mulDiv(shares, price, FIXED_POINT_SCALE).toUint128();
             }
         }
+    }
 
-        return (totalRedeemedShares, totalRedeemedAmount);
+    /**
+     * @notice Get deposit share price
+     * @param liquidity Liquidity state
+     * @param tick Tick
+     * @return Deposit share price
+     */
+    function depositSharePrice(Liquidity storage liquidity, uint128 tick) external view returns (uint256) {
+        Node storage node = liquidity.nodes[tick];
+
+        /* Simulate accrual */
+        uint128 accrued = node.accrual.accrued + node.accrual.rate * uint128(block.timestamp - node.accrual.timestamp);
+
+        /* Return deposit price */
+        return
+            node.shares == 0
+                ? FIXED_POINT_SCALE
+                : (Math.min(node.value + accrued, node.available + node.pending) * FIXED_POINT_SCALE) / node.shares;
+    }
+
+    /**
+     * @notice Get redemption share price
+     * @param liquidity Liquidity state
+     * @param tick Tick
+     * @return Redemption share price
+     */
+    function redemptionSharePrice(Liquidity storage liquidity, uint128 tick) external view returns (uint256) {
+        Node storage node = liquidity.nodes[tick];
+
+        /* Revert if node is empty */
+        if (node.value == 0 || node.shares == 0) revert ILiquidity.InactiveLiquidity();
+
+        /* Return redemption price */
+        return (node.value * FIXED_POINT_SCALE) / node.shares;
     }
 
     /**************************************************************************/
@@ -246,7 +375,7 @@ library LiquidityManager {
      * @return True if empty, otherwise false
      */
     function _isEmpty(Node storage node) internal view returns (bool) {
-        return node.shares == 0 && node.pending == 0;
+        return node.shares <= LOCKED_SHARES && node.pending == 0;
     }
 
     /**
@@ -271,36 +400,64 @@ library LiquidityManager {
     /**
      * @notice Instantiate liquidity
      * @param liquidity Liquidity state
+     * @param node Liquidity node
      * @param tick Tick
      */
     function _instantiate(Liquidity storage liquidity, Node storage node, uint128 tick) internal {
         /* If node is active, do nothing */
         if (_isActive(node)) return;
         /* If node is inactive and not empty, revert */
-        if (!_isEmpty(node)) revert InactiveLiquidity();
+        if (!_isEmpty(node)) revert ILiquidity.InactiveLiquidity();
 
-        /* Find prior node to new tick */
+        /* Instantiate previous tick and previous node */
         uint128 prevTick;
         Node storage prevNode = liquidity.nodes[prevTick];
-        while (prevNode.next < tick) {
+
+        /* Decode limit and limit type from new tick and next tick */
+        (uint256 newLimit, , , Tick.LimitType newLimitType) = Tick.decode(tick, BASIS_POINTS_SCALE);
+        (uint256 nextLimit, , , Tick.LimitType nextLimitType) = Tick.decode(prevNode.next, BASIS_POINTS_SCALE);
+
+        /* Find prior node to new tick */
+        bool isAbsoluteType = newLimitType == Tick.LimitType.Absolute;
+        while (nextLimitType == newLimitType ? nextLimit < newLimit : isAbsoluteType) {
             prevTick = prevNode.next;
             prevNode = liquidity.nodes[prevTick];
+
+            /* Decode limit and limit type from next tick */
+            (nextLimit, , , nextLimitType) = Tick.decode(prevNode.next, BASIS_POINTS_SCALE);
         }
 
-        /* Decode limits from previous tick, new tick, and next tick */
-        (uint256 prevLimit, , , ) = Tick.decode(prevTick);
-        (uint256 newLimit, , , ) = Tick.decode(tick);
-        (uint256 nextLimit, , , ) = Tick.decode(prevNode.next);
+        /* Decode limit and limit type from prev tick */
+        (uint256 prevLimit, , , Tick.LimitType prevLimitType) = Tick.decode(prevTick, BASIS_POINTS_SCALE);
 
         /* Validate tick limit spacing */
-        if (
-            newLimit != prevLimit &&
-            newLimit < (prevLimit * (BASIS_POINTS_SCALE + TICK_LIMIT_SPACING_BASIS_POINTS)) / BASIS_POINTS_SCALE
-        ) revert InsufficientTickSpacing();
-        if (
-            newLimit != nextLimit &&
-            nextLimit < (newLimit * (BASIS_POINTS_SCALE + TICK_LIMIT_SPACING_BASIS_POINTS)) / BASIS_POINTS_SCALE
-        ) revert InsufficientTickSpacing();
+        if (isAbsoluteType) {
+            /* Validate new absolute limit */
+            if (
+                newLimit != prevLimit &&
+                prevLimitType == Tick.LimitType.Absolute &&
+                newLimit <
+                (prevLimit * (BASIS_POINTS_SCALE + ABSOLUTE_TICK_LIMIT_SPACING_BASIS_POINTS)) / BASIS_POINTS_SCALE
+            ) revert ILiquidity.InsufficientTickSpacing();
+            if (
+                newLimit != nextLimit &&
+                nextLimitType == Tick.LimitType.Absolute &&
+                nextLimit <
+                (newLimit * (BASIS_POINTS_SCALE + ABSOLUTE_TICK_LIMIT_SPACING_BASIS_POINTS)) / BASIS_POINTS_SCALE
+            ) revert ILiquidity.InsufficientTickSpacing();
+        } else {
+            /* Validate new ratio limit */
+            if (
+                newLimit != prevLimit &&
+                prevLimitType == Tick.LimitType.Ratio &&
+                newLimit < (prevLimit + RATIO_TICK_LIMIT_SPACING_BASIS_POINTS)
+            ) revert ILiquidity.InsufficientTickSpacing();
+            if (
+                newLimit != nextLimit &&
+                nextLimitType == Tick.LimitType.Ratio &&
+                nextLimit < (newLimit + RATIO_TICK_LIMIT_SPACING_BASIS_POINTS)
+            ) revert ILiquidity.InsufficientTickSpacing();
+        }
 
         /* Link new node */
         node.prev = prevTick;
@@ -388,6 +545,15 @@ library LiquidityManager {
         }
     }
 
+    /**
+     * @notice Process accrued value from accrual rate and timestamp
+     * @param node Liquidity node
+     */
+    function _accrue(Node storage node) internal {
+        node.accrual.accrued += node.accrual.rate * uint128(block.timestamp - node.accrual.timestamp);
+        node.accrual.timestamp = uint64(block.timestamp);
+    }
+
     /**************************************************************************/
     /* Primary API */
     /**************************************************************************/
@@ -413,16 +579,25 @@ library LiquidityManager {
         Node storage node = liquidity.nodes[tick];
 
         /* If tick is reserved */
-        if (_isReserved(tick)) revert InactiveLiquidity();
+        if (_isReserved(tick)) revert ILiquidity.InactiveLiquidity();
 
         /* Instantiate node, if necessary */
         _instantiate(liquidity, node, tick);
 
-        /* Compute deposit price as current value + 50% of pending returns */
+        /* Process accrual */
+        _accrue(node);
+
+        /* Compute deposit price */
         uint256 price = node.shares == 0
             ? FIXED_POINT_SCALE
-            : ((node.value + (node.available + node.pending - node.value) / 2) * FIXED_POINT_SCALE) / node.shares;
+            : (Math.min(node.value + node.accrual.accrued, node.available + node.pending) * FIXED_POINT_SCALE) /
+                node.shares;
+
+        /* Compute shares and depositor's shares */
         uint128 shares = ((amount * FIXED_POINT_SCALE) / price).toUint128();
+
+        /* If this is the initial deposit, lock subset of shares */
+        bool initialDeposit = node.shares < LOCKED_SHARES;
 
         node.value += amount;
         node.shares += shares;
@@ -431,7 +606,7 @@ library LiquidityManager {
         /* Process any pending redemptions from available cash */
         _processRedemptions(liquidity, node);
 
-        return shares;
+        return initialDeposit ? shares - LOCKED_SHARES : shares;
     }
 
     /**
@@ -439,13 +614,20 @@ library LiquidityManager {
      * @param liquidity Liquidity state
      * @param tick Tick
      * @param used Used amount
-     * @param pending Pending Amount
+     * @param pending Pending amount
+     * @param duration Duration
      */
-    function use(Liquidity storage liquidity, uint128 tick, uint128 used, uint128 pending) internal {
+    function use(Liquidity storage liquidity, uint128 tick, uint128 used, uint128 pending, uint64 duration) internal {
         Node storage node = liquidity.nodes[tick];
 
         node.available -= used;
         node.pending += pending;
+
+        /* Process accrual */
+        _accrue(node);
+        /* Increment accrual rate */
+        uint256 rate = uint256(pending - used) / duration;
+        node.accrual.rate += rate.toUint64();
     }
 
     /**
@@ -455,13 +637,17 @@ library LiquidityManager {
      * @param used Used amount
      * @param pending Pending amount
      * @param restored Restored amount
+     * @param duration Duration
+     * @param elapsed Elapsed time since loan origination
      */
     function restore(
         Liquidity storage liquidity,
         uint128 tick,
         uint128 used,
         uint128 pending,
-        uint128 restored
+        uint128 restored,
+        uint64 duration,
+        uint64 elapsed
     ) internal {
         Node storage node = liquidity.nodes[tick];
 
@@ -474,6 +660,13 @@ library LiquidityManager {
 
         /* Process any pending redemptions */
         _processRedemptions(liquidity, node);
+
+        /* Process accrual */
+        _accrue(node);
+        /* Decrement accrual rate and accrued */
+        uint256 rate = uint256(pending - used) / duration;
+        node.accrual.rate -= rate.toUint64();
+        node.accrual.accrued -= uint128(rate * elapsed);
     }
 
     /**
@@ -514,6 +707,7 @@ library LiquidityManager {
      * @param ticks Ticks to source from
      * @param multiplier Multiplier for amount
      * @param durationIndex Duration index for amount
+     * @param oraclePrice Collateral token price from price oracle, if any
      * @return Sourced liquidity nodes, count of nodes
      */
     function source(
@@ -521,18 +715,19 @@ library LiquidityManager {
         uint256 amount,
         uint128[] calldata ticks,
         uint256 multiplier,
-        uint256 durationIndex
-    ) internal view returns (ILiquidity.NodeSource[] memory, uint16) {
-        ILiquidity.NodeSource[] memory sources = new ILiquidity.NodeSource[](ticks.length);
+        uint256 durationIndex,
+        uint256 oraclePrice
+    ) internal view returns (NodeSource[] memory, uint16) {
+        NodeSource[] memory sources = new NodeSource[](ticks.length);
 
-        uint256 prevTick;
+        uint128 prevTick;
         uint256 taken;
         uint256 count;
         for (; count < ticks.length && taken != amount; count++) {
             uint128 tick = ticks[count];
 
             /* Validate tick and decode limit */
-            uint256 limit = Tick.validate(tick, prevTick, durationIndex);
+            uint256 limit = Tick.validate(tick, prevTick, durationIndex, oraclePrice);
 
             /* Look up liquidity node */
             Node storage node = liquidity.nodes[tick];
@@ -541,14 +736,17 @@ library LiquidityManager {
             uint128 take = uint128(Math.min(Math.min(limit * multiplier - taken, node.available), amount - taken));
 
             /* Record the liquidity allocation in our sources list */
-            sources[count] = ILiquidity.NodeSource({tick: tick, used: take});
+            sources[count] = NodeSource({tick: tick, used: take, pending: 0});
 
             taken += take;
             prevTick = tick;
         }
 
         /* If unable to source required liquidity amount from provided ticks */
-        if (taken < amount) revert InsufficientLiquidity();
+        if (taken < amount) revert ILiquidity.InsufficientLiquidity();
+
+        /* If count exceeds max number of ticks */
+        if (count > MAX_TICKS_USED_COUNT) revert ILiquidity.InsufficientLiquidity();
 
         return (sources, count.toUint16());
     }

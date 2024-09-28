@@ -1,22 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
-import "../CollateralFilter.sol";
+import "./CollateralFilter.sol";
 
 /**
  * @title Ranged Collection Collateral Filter
  * @author MetaStreet Labs
  */
 contract RangedCollectionCollateralFilter is CollateralFilter {
-    /**************************************************************************/
-    /* Errors */
-    /**************************************************************************/
-
-    /**
-     * @notice Invalid address
-     */
-    error InvalidRange();
-
     /**************************************************************************/
     /* State */
     /**************************************************************************/
@@ -44,7 +35,7 @@ contract RangedCollectionCollateralFilter is CollateralFilter {
      * @notice RangedCollectionCollateralFilter initializer
      */
     function _initialize(address token, uint256 startTokenId, uint256 endTokenId) internal {
-        if (endTokenId < startTokenId) revert InvalidRange();
+        if (endTokenId < startTokenId) revert InvalidCollateralFilterParameters();
 
         _token = token;
         _startTokenId = startTokenId;
@@ -72,8 +63,18 @@ contract RangedCollectionCollateralFilter is CollateralFilter {
     /**
      * @inheritdoc CollateralFilter
      */
-    function collateralToken() external view override returns (address) {
+    function collateralToken() public view override returns (address) {
         return _token;
+    }
+
+    /**
+     * @inheritdoc CollateralFilter
+     */
+    function collateralTokens() external view override returns (address[] memory) {
+        address[] memory tokens = new address[](1);
+        tokens[0] = _token;
+
+        return tokens;
     }
 
     /**

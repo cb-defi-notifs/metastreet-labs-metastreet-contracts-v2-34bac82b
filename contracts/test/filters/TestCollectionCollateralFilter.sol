@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "../../filters/CollectionCollateralFilter.sol";
 
@@ -12,8 +12,8 @@ contract TestCollectionCollateralFilter is CollectionCollateralFilter {
     /* Constructor */
     /**************************************************************************/
 
-    constructor(address token) {
-        _initialize(token);
+    constructor(address[] memory tokens) {
+        _initialize(tokens);
     }
 
     /**************************************************************************/

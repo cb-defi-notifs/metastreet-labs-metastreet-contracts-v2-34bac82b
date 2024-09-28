@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "../interfaces/ILiquidity.sol";
 
@@ -20,14 +20,14 @@ contract TestLoanReceipt {
     /**
      * @dev External wrapper function for LoanReceipt.encode()
      */
-    function encode(LoanReceipt.LoanReceiptV1 memory receipt) external pure returns (bytes memory) {
+    function encode(LoanReceipt.LoanReceiptV2 memory receipt) external pure returns (bytes memory) {
         return LoanReceipt.encode(receipt);
     }
 
     /**
      * @dev External wrapper function for LoanReceipt.decode()
      */
-    function decode(bytes calldata encodedReceipt) external pure returns (LoanReceipt.LoanReceiptV1 memory) {
+    function decode(bytes calldata encodedReceipt) external pure returns (LoanReceipt.LoanReceiptV2 memory) {
         return LoanReceipt.decode(encodedReceipt);
     }
 }

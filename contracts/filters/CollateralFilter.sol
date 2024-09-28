@@ -6,6 +6,19 @@ pragma solidity ^0.8.0;
  * @author MetaStreet Labs
  */
 abstract contract CollateralFilter {
+    /**************************************************************************/
+    /* Errors */
+    /**************************************************************************/
+
+    /**
+     * @notice Invalid parameters
+     */
+    error InvalidCollateralFilterParameters();
+
+    /**************************************************************************/
+    /* API */
+    /**************************************************************************/
+
     /**
      * @notice Get collateral filter name
      * @return Collateral filter name
@@ -22,7 +35,13 @@ abstract contract CollateralFilter {
      * @notice Get collateral token
      * @return Collateral token contract
      */
-    function collateralToken() external view virtual returns (address);
+    function collateralToken() public view virtual returns (address);
+
+    /**
+     * @notice Get collateral tokens
+     * @return Collateral token contract
+     */
+    function collateralTokens() external view virtual returns (address[] memory);
 
     /**
      * Query if collateral token is supported

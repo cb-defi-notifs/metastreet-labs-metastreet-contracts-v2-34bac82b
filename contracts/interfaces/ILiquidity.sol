@@ -6,18 +6,27 @@ pragma solidity ^0.8.0;
  */
 interface ILiquidity {
     /**************************************************************************/
-    /* Structures */
+    /* Errors */
     /**************************************************************************/
 
     /**
-     * @notice Node source
-     * @param tick Tick
-     * @param used Amount used
+     * @notice Insufficient liquidity
      */
-    struct NodeSource {
-        uint128 tick;
-        uint128 used;
-    }
+    error InsufficientLiquidity();
+
+    /**
+     * @notice Inactive liquidity
+     */
+    error InactiveLiquidity();
+
+    /**
+     * @notice Insufficient tick spacing
+     */
+    error InsufficientTickSpacing();
+
+    /**************************************************************************/
+    /* Structures */
+    /**************************************************************************/
 
     /**
      * @notice Flattened liquidity node returned by getter
@@ -41,6 +50,18 @@ interface ILiquidity {
         uint128 next;
     }
 
+    /**
+     * @notice Accrual info returned by getter
+     * @param accrued Accrued interest
+     * @param rate Accrual rate
+     * @param timestamp Accrual timestamp
+     */
+    struct AccrualInfo {
+        uint128 accrued;
+        uint64 rate;
+        uint64 timestamp;
+    }
+
     /**************************************************************************/
     /* API */
     /**************************************************************************/
@@ -59,4 +80,25 @@ interface ILiquidity {
      * @return Liquidity node
      */
     function liquidityNode(uint128 tick) external view returns (NodeInfo memory);
+
+    /**
+     * Get liquidity node with accrual info at tick
+     * @param tick Tick
+     * @return Liquidity node, Accrual info
+     */
+    function liquidityNodeWithAccrual(uint128 tick) external view returns (NodeInfo memory, AccrualInfo memory);
+
+    /**
+     * @notice Get deposit share price
+     * @param tick Tick
+     * @return Deposit share price
+     */
+    function depositSharePrice(uint128 tick) external view returns (uint256);
+
+    /**
+     * @notice Get redemption share price
+     * @param tick Tick
+     * @return Redemption share price
+     */
+    function redemptionSharePrice(uint128 tick) external view returns (uint256);
 }

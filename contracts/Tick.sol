@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
+
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title Tick
@@ -7,25 +9,38 @@ pragma solidity 0.8.20;
  */
 library Tick {
     /*
-     * A tick encodes three conditions on liquidity: limit, duration, and rate.
+     * A tick encodes three conditions on liquidity: limit, duration, rate, and type.
      * Limit is the maximum depth that liquidity sourced from the node can be
      * used in. Duration is the maximum allowed duration for that liquidity.
      * Rate is the interest rate associated with that liquidity. Duration and
-     * rates are encoded as indexes into predetermined, discrete tiers.
+     * rates are encoded as indexes into predetermined, discrete tiers. Type is the
+     * type of limit, which could either be absolute or ratio-based.
      *
-     * +-----------------------------------------------------------------------+
-     * |                                 128                                   |
-     * +--------------------------------------|----------|----------|----------+
-     * |                  120                 |    3     |     3    |     2    |
-     * |                 Limit                | Dur. Idx | Rate Idx | Reserved |
-     * +-----------------------------------------------------------------------+
+     * +---------------------------------------------------------------------+
+     * |                                 128                                 |
+     * +--------------------------------------|----------|----------|--------+
+     * |                  120                 |    3     |     3    |    2   |
+     * |                 Limit                | Dur. Idx | Rate Idx |  Type  |
+     * +---------------------------------------------------------------------+
      *
-     * Duration Index is ordered from shortest duration to longest, e.g. 7
-     * days, 14 days, 30 days.
+     * Duration Index is ordered from longest duration to shortest, e.g. 30
+     * days, 14 days, 7 days.
      *
      * Rate Index is ordered from lowest rate to highest rate, e.g. 10%, 30%,
      * 50%.
      */
+
+    /**************************************************************************/
+    /* Structures */
+    /**************************************************************************/
+
+    /**
+     * @notice Limit type
+     */
+    enum LimitType {
+        Absolute,
+        Ratio
+    }
 
     /**************************************************************************/
     /* Constants */
@@ -62,14 +77,9 @@ library Tick {
     uint256 internal constant TICK_RATE_SHIFT = 2;
 
     /**
-     * @notice Tick reserved mask
+     * @notice Tick limit type mask
      */
-    uint256 internal constant TICK_RESERVED_MASK = 0x3;
-
-    /**
-     * @notice Tick reserved shift
-     */
-    uint256 internal constant TICK_RESERVED_SHIFT = 0;
+    uint256 internal constant TICK_LIMIT_TYPE_MASK = 0x3;
 
     /**
      * @notice Maximum number of durations supported
@@ -80,6 +90,11 @@ library Tick {
      * @notice Maximum number of rates supported
      */
     uint256 internal constant MAX_NUM_RATES = TICK_RATE_MASK + 1;
+
+    /**
+     * @notice Basis points scale
+     */
+    uint256 internal constant BASIS_POINTS_SCALE = 10_000;
 
     /**************************************************************************/
     /* Errors */
@@ -97,31 +112,43 @@ library Tick {
     /**
      * @dev Decode a Tick
      * @param tick Tick
+     * @param oraclePrice Oracle price
      * @return limit Limit field
      * @return duration Duration field
      * @return rate Rate field
-     * @return reserved Reserved field
+     * @return limitType Limit type field
      */
     function decode(
-        uint128 tick
-    ) internal pure returns (uint256 limit, uint256 duration, uint256 rate, uint256 reserved) {
+        uint128 tick,
+        uint256 oraclePrice
+    ) internal pure returns (uint256 limit, uint256 duration, uint256 rate, LimitType limitType) {
         limit = ((tick >> TICK_LIMIT_SHIFT) & TICK_LIMIT_MASK);
         duration = ((tick >> TICK_DURATION_SHIFT) & TICK_DURATION_MASK);
         rate = ((tick >> TICK_RATE_SHIFT) & TICK_RATE_MASK);
-        reserved = ((tick >> TICK_RESERVED_SHIFT) & TICK_RESERVED_MASK);
+        limitType = tick == type(uint128).max ? LimitType.Absolute : LimitType(tick & TICK_LIMIT_TYPE_MASK);
+        limit = limitType == LimitType.Ratio ? Math.mulDiv(oraclePrice, limit, BASIS_POINTS_SCALE) : limit;
     }
 
     /**
      * @dev Validate a Tick (fast)
      * @param tick Tick
      * @param prevTick Previous tick
-     * @param minDurationIndex Minimum Duration Index (inclusive)
+     * @param maxDurationIndex Maximum Duration Index (inclusive)
+     * @param oraclePrice Oracle price
      * @return Limit field
      */
-    function validate(uint128 tick, uint256 prevTick, uint256 minDurationIndex) internal pure returns (uint256) {
-        (uint256 limit, uint256 duration, , ) = decode(tick);
-        if (tick <= prevTick) revert InvalidTick();
-        if (duration < minDurationIndex) revert InvalidTick();
+    function validate(
+        uint128 tick,
+        uint128 prevTick,
+        uint256 maxDurationIndex,
+        uint256 oraclePrice
+    ) internal pure returns (uint256) {
+        (uint256 prevLimit, uint256 prevDuration, uint256 prevRate, ) = decode(prevTick, oraclePrice);
+        (uint256 limit, uint256 duration, uint256 rate, ) = decode(tick, oraclePrice);
+        if (limit < prevLimit) revert InvalidTick();
+        if (limit == prevLimit && duration < prevDuration) revert InvalidTick();
+        if (limit == prevLimit && duration == prevDuration && rate <= prevRate) revert InvalidTick();
+        if (duration > maxDurationIndex) revert InvalidTick();
         return limit;
     }
 
@@ -142,10 +169,12 @@ library Tick {
         uint256 minRateIndex,
         uint256 maxRateIndex
     ) internal pure {
-        (uint256 limit, uint256 duration, uint256 rate, uint256 reserved) = decode(tick);
+        (uint256 limit, uint256 duration, uint256 rate, LimitType limitType) = decode(tick, BASIS_POINTS_SCALE);
         if (limit <= minLimit) revert InvalidTick();
-        if (duration < minDurationIndex || duration > maxDurationIndex) revert InvalidTick();
-        if (rate < minRateIndex || rate > maxRateIndex) revert InvalidTick();
-        if (reserved != 0) revert InvalidTick();
+        if (duration < minDurationIndex) revert InvalidTick();
+        if (duration > maxDurationIndex) revert InvalidTick();
+        if (rate < minRateIndex) revert InvalidTick();
+        if (rate > maxRateIndex) revert InvalidTick();
+        if (limitType == LimitType.Ratio && limit > BASIS_POINTS_SCALE) revert InvalidTick();
     }
 }

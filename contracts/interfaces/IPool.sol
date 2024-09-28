@@ -55,6 +55,11 @@ interface IPool {
      */
     error LoanNotExpired();
 
+    /**
+     * @notice Invalid parameters
+     */
+    error InvalidParameters();
+
     /**************************************************************************/
     /* Events */
     /**************************************************************************/
@@ -72,18 +77,35 @@ interface IPool {
      * @notice Emitted when deposit shares are redeemed
      * @param account Account
      * @param tick Tick
+     * @param redemptionId Redemption ID
      * @param shares Amount of shares to be redeemed
      */
-    event Redeemed(address indexed account, uint128 indexed tick, uint256 shares);
+    event Redeemed(address indexed account, uint128 indexed tick, uint128 indexed redemptionId, uint256 shares);
 
     /**
      * @notice Emitted when redeemed currency tokens are withdrawn
      * @param account Account
      * @param tick Tick
+     * @param redemptionId Redemption ID
      * @param shares Amount of shares redeemed
      * @param amount Amount of currency tokens withdrawn
      */
-    event Withdrawn(address indexed account, uint128 indexed tick, uint256 shares, uint256 amount);
+    event Withdrawn(
+        address indexed account,
+        uint128 indexed tick,
+        uint128 indexed redemptionId,
+        uint256 shares,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when deposit shares are transferred
+     * @param from Source account
+     * @param to Destination account
+     * @param tick Tick
+     * @param shares Amount of shares transferred
+     */
+    event Transferred(address indexed from, address indexed to, uint128 indexed tick, uint256 shares);
 
     /**
      * @notice Emitted when a loan is originated
@@ -115,17 +137,26 @@ interface IPool {
     event CollateralLiquidated(bytes32 indexed loanReceiptHash, uint256 proceeds, uint256 borrowerProceeds);
 
     /**
-     * @notice Emitted when admin fee rate is updated
+     * @notice Emitted when admin fee is updated
      * @param rate New admin fee rate in basis points
+     * @param feeShareRecipient New recipient of fee share
+     * @param feeShareSplit New fee share split in basis points
      */
-    event AdminFeeRateUpdated(uint256 rate);
+    event AdminFeeUpdated(uint32 rate, address indexed feeShareRecipient, uint16 feeShareSplit);
 
     /**
      * @notice Emitted when admin fees are withdrawn
-     * @param account Recipient account
+     * @param recipient Recipient account
      * @param amount Amount of currency tokens withdrawn
      */
-    event AdminFeesWithdrawn(address indexed account, uint256 amount);
+    event AdminFeesWithdrawn(address indexed recipient, uint256 amount);
+
+    /**
+     * @notice Emitted when admin fee share is transferred to recipient
+     * @param feeShareRecipient Fee share recipient
+     * @param feeShareAmount Fee share amount
+     */
+    event AdminFeeShareTransferred(address indexed feeShareRecipient, uint256 feeShareAmount);
 
     /**************************************************************************/
     /* Getters */
@@ -162,6 +193,12 @@ interface IPool {
     function adminFeeRate() external view returns (uint32);
 
     /**
+     * @notice Get admin fee balance
+     * @return Admin fee balance in currency tokens
+     */
+    function adminFeeBalance() external view returns (uint256);
+
+    /**
      * @notice Get list of supported collateral wrappers
      * @return Collateral wrappers
      */
@@ -174,10 +211,16 @@ interface IPool {
     function collateralLiquidator() external view returns (address);
 
     /**
-     * @notice Get delegation registry contract
+     * @notice Get delegation registry v1 contract
      * @return Delegation registry contract
      */
     function delegationRegistry() external view returns (address);
+
+    /**
+     * @notice Get delegation registry v2 contract
+     * @return Delegation registry contract
+     */
+    function delegationRegistryV2() external view returns (address);
 
     /**************************************************************************/
     /* Deposit API */
@@ -204,18 +247,25 @@ interface IPool {
      *
      * @param tick Tick
      * @param shares Amount of deposit shares to redeem
+     * @return redemptionId Redemption ID
      */
-    function redeem(uint128 tick, uint256 shares) external;
+    function redeem(uint128 tick, uint256 shares) external returns (uint128 redemptionId);
 
     /**
      * @notice Get redemption available
      *
      * @param account Account
      * @param tick Tick
+     * @param redemptionId Redemption ID
      * @return shares Amount of deposit shares available for redemption
      * @return amount Amount of currency tokens available for withdrawal
+     * @return sharesAhead Amount of pending shares ahead in queue
      */
-    function redemptionAvailable(address account, uint128 tick) external view returns (uint256 shares, uint256 amount);
+    function redemptionAvailable(
+        address account,
+        uint128 tick,
+        uint128 redemptionId
+    ) external view returns (uint256 shares, uint256 amount, uint256 sharesAhead);
 
     /**
      * @notice Withdraw a redemption that is available
@@ -223,10 +273,11 @@ interface IPool {
      * Emits a {Withdrawn} event.
      *
      * @param tick Tick
+     * @param redemptionId Redemption ID
      * @return shares Amount of deposit shares burned
      * @return amount Amount of currency tokens withdrawn
      */
-    function withdraw(uint128 tick) external returns (uint256 shares, uint256 amount);
+    function withdraw(uint128 tick, uint128 redemptionId) external returns (uint256 shares, uint256 amount);
 
     /**
      * @notice Rebalance a redemption that is available to a new tick
@@ -235,6 +286,7 @@ interface IPool {
      *
      * @param srcTick Source tick
      * @param dstTick Destination Tick
+     * @param redemptionId Redemption ID
      * @param minShares Minimum amount of destination shares to receive
      * @return oldShares Amount of source deposit shares burned
      * @return newShares Amount of destination deposit shares minted
@@ -243,6 +295,7 @@ interface IPool {
     function rebalance(
         uint128 srcTick,
         uint128 dstTick,
+        uint128 redemptionId,
         uint256 minShares
     ) external returns (uint256 oldShares, uint256 newShares, uint256 amount);
 
@@ -254,37 +307,20 @@ interface IPool {
      * @notice Quote repayment for a loan
      * @param principal Principal amount in currency tokens
      * @param duration Duration in seconds
-     * @param collateralToken Collateral token
-     * @param collateralTokenIds List of collateral token IDs
+     * @param collateralToken Collateral token address
+     * @param collateralTokenId Collateral token ID
      * @param ticks Liquidity ticks
      * @param options Encoded options
-     * @return Repayment amount in currency tokens
+     * @return repayment Repayment amount in currency tokens
      */
     function quote(
         uint256 principal,
         uint64 duration,
         address collateralToken,
-        uint256[] calldata collateralTokenIds,
+        uint256 collateralTokenId,
         uint128[] calldata ticks,
         bytes calldata options
-    ) external view returns (uint256);
-
-    /**
-     * @notice Quote refinancing for a loan
-     *
-     * @param encodedLoanReceipt Encoded loan receipt
-     * @param principal New principal amount in currency tokens
-     * @param duration Duration in seconds
-     * @param ticks Liquidity ticks
-     * @return downpayment Downpayment in currency tokens (positive for downpayment, negative for credit)
-     * @return repayment Repayment amount in currency tokens for new loan
-     */
-    function quoteRefinance(
-        bytes calldata encodedLoanReceipt,
-        uint256 principal,
-        uint64 duration,
-        uint128[] calldata ticks
-    ) external view returns (int256 downpayment, uint256 repayment);
+    ) external view returns (uint256 repayment);
 
     /**
      * @notice Originate a loan
@@ -298,7 +334,7 @@ interface IPool {
      * @param maxRepayment Maximum repayment amount in currency tokens
      * @param ticks Liquidity ticks
      * @param options Encoded options
-     * @return Repayment amount in currency tokens
+     * @return repayment Repayment amount in currency tokens
      */
     function borrow(
         uint256 principal,
@@ -308,7 +344,7 @@ interface IPool {
         uint256 maxRepayment,
         uint128[] calldata ticks,
         bytes calldata options
-    ) external returns (uint256);
+    ) external returns (uint256 repayment);
 
     /**
      * @notice Repay a loan
@@ -316,9 +352,9 @@ interface IPool {
      * Emits a {LoanRepaid} event.
      *
      * @param encodedLoanReceipt Encoded loan receipt
-     * @return Repayment amount in currency tokens
+     * @return repayment Repayment amount in currency tokens
      */
-    function repay(bytes calldata encodedLoanReceipt) external returns (uint256);
+    function repay(bytes calldata encodedLoanReceipt) external returns (uint256 repayment);
 
     /**
      * @notice Refinance a loan
@@ -330,15 +366,17 @@ interface IPool {
      * @param duration Duration in seconds
      * @param maxRepayment Maximum repayment amount in currency tokens
      * @param ticks Liquidity ticks
-     * @return Repayment amount in currency tokens
+     * @param options Encoded options
+     * @return repayment Repayment amount in currency tokens
      */
     function refinance(
         bytes calldata encodedLoanReceipt,
         uint256 principal,
         uint64 duration,
         uint256 maxRepayment,
-        uint128[] calldata ticks
-    ) external returns (uint256);
+        uint128[] calldata ticks,
+        bytes calldata options
+    ) external returns (uint256 repayment);
 
     /**
      * @notice Liquidate an expired loan

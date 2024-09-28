@@ -1,44 +1,52 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "../Pool.sol";
 import "../rates/WeightedInterestRateModel.sol";
 import "../filters/CollectionCollateralFilter.sol";
+import "../tokenization/ERC20DepositToken.sol";
+import "../oracle/ExternalPriceOracle.sol";
 
 /**
  * @title Pool Configuration with a Weighted Interest Rate Model and Collection
  * Collateral Filter
  * @author MetaStreet Labs
  */
-contract WeightedRateCollectionPool is Pool, WeightedInterestRateModel, CollectionCollateralFilter {
-    /**************************************************************************/
-    /* State */
-    /**************************************************************************/
-
-    /**
-     * @notice Initialized boolean
-     */
-    bool private _initialized;
-
+contract WeightedRateCollectionPool is
+    Pool,
+    WeightedInterestRateModel,
+    CollectionCollateralFilter,
+    ERC20DepositToken,
+    ExternalPriceOracle
+{
     /**************************************************************************/
     /* Constructor */
     /**************************************************************************/
 
     /**
      * @notice Pool constructor
-     * @param collateralLiquidator_ Collateral liquidator
-     * @param delegationRegistry_ Delegation registry contract
+     * @param collateralLiquidator Collateral liquidator
+     * @param delegateRegistryV1 Delegation registry v1 contract
+     * @param delegateRegistryV2 Delegation registry v2 contract
+     * @param erc20DepositTokenImplementation ERC20 Deposit Token implementation address
      * @param collateralWrappers Collateral wrappers
-     * @param parameters WeightedInterestRateModel parameters
      */
     constructor(
-        address collateralLiquidator_,
-        address delegationRegistry_,
-        address[] memory collateralWrappers,
-        WeightedInterestRateModel.Parameters memory parameters
-    ) Pool(collateralLiquidator_, delegationRegistry_, collateralWrappers) WeightedInterestRateModel(parameters) {
+        address collateralLiquidator,
+        address delegateRegistryV1,
+        address delegateRegistryV2,
+        address erc20DepositTokenImplementation,
+        address[] memory collateralWrappers
+    )
+        Pool(collateralLiquidator, delegateRegistryV1, delegateRegistryV2, collateralWrappers)
+        WeightedInterestRateModel()
+        ERC20DepositToken(erc20DepositTokenImplementation)
+        ExternalPriceOracle()
+    {
         /* Disable initialization of implementation contract */
-        _initialized = true;
+        _storage.currencyToken = IERC20(address(1));
     }
 
     /**************************************************************************/
@@ -51,16 +59,22 @@ contract WeightedRateCollectionPool is Pool, WeightedInterestRateModel, Collecti
      * @param params ABI-encoded parameters
      */
     function initialize(bytes memory params) external {
-        require(!_initialized, "Already initialized");
-
-        _initialized = true;
+        require(address(_storage.currencyToken) == address(0), "Already initialized");
 
         /* Decode parameters */
-        (address collateralToken_, address currencyToken_, uint64[] memory durations_, uint64[] memory rates_) = abi
-            .decode(params, (address, address, uint64[], uint64[]));
+        (
+            address[] memory collateralTokens_,
+            address currencyToken_,
+            address priceOracle_,
+            uint64[] memory durations_,
+            uint64[] memory rates_
+        ) = abi.decode(params, (address[], address, address, uint64[], uint64[]));
 
         /* Initialize Collateral Filter */
-        CollectionCollateralFilter._initialize(collateralToken_);
+        CollectionCollateralFilter._initialize(collateralTokens_);
+
+        /* Initialize External Price Oracle */
+        ExternalPriceOracle.__initialize(priceOracle_);
 
         /* Initialize Pool */
         Pool._initialize(currencyToken_, durations_, rates_);

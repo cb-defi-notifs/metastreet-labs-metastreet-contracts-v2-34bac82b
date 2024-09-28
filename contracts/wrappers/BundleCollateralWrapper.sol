@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -9,6 +9,7 @@ import "../interfaces/ICollateralWrapper.sol";
 
 /**
  * @title Bundle Collateral Wrapper
+ * @author MetaStreet Labs
  */
 contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard {
     /**************************************************************************/
@@ -18,7 +19,7 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
     /**
      * @notice Implementation version
      */
-    string public constant IMPLEMENTATION_VERSION = "1.0";
+    string public constant IMPLEMENTATION_VERSION = "2.1";
 
     /**
      * @notice Maximum bundle size
@@ -112,17 +113,70 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
         token = address(uint160(bytes20(context[0:20])));
 
         /* Compute number of tokens in context */
-        uint256 count = (context.length - 20) / 32;
+        uint256 tokenCount = (context.length - 20) / 32;
 
         /* Instantiate asset info array */
-        tokenIds = new uint256[](count);
+        tokenIds = new uint256[](tokenCount);
 
         /* Populate asset info array */
         uint256 offset = 20;
-        for (uint256 i; i < count; i++) {
+        for (uint256 i; i < tokenCount; i++) {
             tokenIds[i] = uint256(bytes32(context[offset:offset + 32]));
             offset += 32;
         }
+    }
+
+    /**
+     * @inheritdoc ICollateralWrapper
+     */
+    function enumerateWithQuantities(
+        uint256 tokenId,
+        bytes calldata context
+    ) external view returns (address token, uint256[] memory tokenIds, uint256[] memory quantities) {
+        if (tokenId != uint256(_hash(context))) revert InvalidContext();
+
+        /* Get token address from context */
+        token = address(uint160(bytes20(context[0:20])));
+
+        /* Compute number of tokens in context */
+        uint256 tokenCount = (context.length - 20) / 32;
+
+        /* Instantiate asset info array */
+        tokenIds = new uint256[](tokenCount);
+
+        /* Instantiate quantities array */
+        quantities = new uint256[](tokenCount);
+
+        /* Populate arrays */
+        uint256 offset = 20;
+        for (uint256 i; i < tokenCount; i++) {
+            tokenIds[i] = uint256(bytes32(context[offset:offset + 32]));
+            quantities[i] = 1;
+            offset += 32;
+        }
+    }
+
+    /**
+     * @inheritdoc ICollateralWrapper
+     */
+    function count(uint256 tokenId, bytes calldata context) external view returns (uint256) {
+        if (tokenId != uint256(_hash(context))) revert InvalidContext();
+
+        /* Compute number of tokens in context */
+        return (context.length - 20) / 32;
+    }
+
+    /**
+     * @inheritdoc ICollateralWrapper
+     */
+    function transferCalldata(
+        address token,
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256
+    ) external pure returns (address, bytes memory) {
+        return (token, abi.encodeWithSelector(IERC721.transferFrom.selector, from, to, tokenId));
     }
 
     /**************************************************************************/
@@ -190,13 +244,13 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
         address token = address(uint160(bytes20(context[0:20])));
 
         /* Compute number of token ids */
-        uint256 count = (context.length - 20) / 32;
+        uint256 tokenCount = (context.length - 20) / 32;
 
         _burn(tokenId);
 
         /* Transfer assets back to owner of token */
         uint256 offset = 20;
-        for (uint256 i; i < count; i++) {
+        for (uint256 i; i < tokenCount; i++) {
             IERC721(token).transferFrom(address(this), msg.sender, uint256(bytes32(context[offset:offset + 32])));
             offset += 32;
         }

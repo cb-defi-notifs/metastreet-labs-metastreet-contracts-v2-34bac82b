@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -26,7 +26,7 @@ contract PoolFactory is Ownable, ERC1967Upgrade, IPoolFactory {
     /**
      * @notice Implementation version
      */
-    string public constant IMPLEMENTATION_VERSION = "1.1";
+    string public constant IMPLEMENTATION_VERSION = "1.3";
 
     /**************************************************************************/
     /* State */
@@ -124,7 +124,7 @@ contract PoolFactory is Ownable, ERC1967Upgrade, IPoolFactory {
     /**
      * @inheritdoc IPoolFactory
      */
-    function isPool(address pool) external view returns (bool) {
+    function isPool(address pool) public view returns (bool) {
         return _pools.contains(pool);
     }
 
@@ -161,7 +161,42 @@ contract PoolFactory is Ownable, ERC1967Upgrade, IPoolFactory {
     /**************************************************************************/
 
     /**
+     * @notice Set pool admin fee
+     * @param pool Pool address
+     * @param rate Admin fee rate in basis points
+     * @param feeShareRecipient Recipient of fee share
+     * @param feeShareSplit Fee share split in basis points
+     */
+    function setAdminFee(
+        address pool,
+        uint32 rate,
+        address feeShareRecipient,
+        uint16 feeShareSplit
+    ) external onlyOwner {
+        /* Validate pool */
+        if (!isPool(pool)) revert InvalidPool();
+
+        Address.functionCall(
+            pool,
+            abi.encodeWithSignature("setAdminFee(uint32,address,uint16)", rate, feeShareRecipient, feeShareSplit)
+        );
+    }
+
+    /**
+     * @notice Withdraw admin fees
+     * @param pool Pool address
+     * @param recipient Recipient of admin fees (less fee share)
+     */
+    function withdrawAdminFees(address pool, address recipient) external onlyOwner {
+        /* Validate pool */
+        if (!isPool(pool)) revert InvalidPool();
+
+        Address.functionCall(pool, abi.encodeWithSignature("withdrawAdminFees(address)", recipient));
+    }
+
+    /**
      * @notice Add pool implementation to allowlist
+     * @param poolImplementation Pool implementation
      */
     function addPoolImplementation(address poolImplementation) external onlyOwner {
         if (_allowedImplementations.add(poolImplementation)) {
@@ -171,6 +206,7 @@ contract PoolFactory is Ownable, ERC1967Upgrade, IPoolFactory {
 
     /**
      * @notice Remove pool implementation from allowlist
+     * @param poolImplementation Pool implementation
      */
     function removePoolImplementation(address poolImplementation) external onlyOwner {
         if (_allowedImplementations.remove(poolImplementation)) {

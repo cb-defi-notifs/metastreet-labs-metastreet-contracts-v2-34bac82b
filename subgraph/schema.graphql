@@ -5,18 +5,26 @@
 type Pool @entity {
   id: Bytes! # address
   # Properties
+  implementationVersionMajor: String!
   implementation: Bytes! # address
   collateralToken: CollateralToken!
   currencyToken: CurrencyToken!
   collateralWrappers: [Bytes!]! # address[]
   durations: [BigInt!]! # uint64[] (in seconds)
   rates: [BigInt!]! # uint64[]
-  adminFeeRate: BigInt! # uint64
+  adminFeeRate: BigInt! # uint256
+  adminFeeShareRecipient: Bytes! # address
+  adminFeeShareSplit: Int! # uint32
   collateralLiquidator: Bytes! # address
   delegationRegistry: Bytes! # address
+  externalPriceOracle: Bytes # address
+  # Collateral Filter
+  tokenIdRange: [BigInt!]
+  tokenIdSet: [BigInt!]
+  tokenIdMerkleRoot: Bytes
+  tokenIdMerkleMetadataURI: String
   # Derived Properties
-  maxBorrow: BigInt! # uint256
-  maxLoanDuration: BigInt! # uint64 (in seconds)
+  maxBorrows: [BigInt!]! # uint256[]
   # State
   adminFeeBalance: BigInt! # uint256
   ticks: [Tick!]! @derivedFrom(field: "pool")
@@ -52,12 +60,8 @@ type PoolDayData @entity(immutable: true) {
 ################################################################################
 
 type CollateralToken @entity {
-  id: ID!
-  address: Bytes!
-  startTokenId: BigInt # uint256
-  endTokenId: BigInt # uint256
+  id: Bytes! # address
   name: String!
-  auctionsActive: BigInt!
   pools: [Pool!]! @derivedFrom(field: "collateralToken")
 }
 
@@ -69,6 +73,7 @@ type CurrencyToken @entity {
   id: Bytes!
   name: String!
   symbol: String!
+  decimals: Int!
   pools: [Pool!]! @derivedFrom(field: "currencyToken")
 }
 
@@ -87,7 +92,9 @@ type Tick @entity {
   rate: BigInt! # uint64
   durationIndex: Int! # uint3
   rateIndex: Int! # uint3
+  limitType: Int! # uint2
   # node info
+  active: Boolean!
   value: BigInt! # uint128
   shares: BigInt! # uint128
   available: BigInt! # uint128
@@ -95,9 +102,15 @@ type Tick @entity {
   redemptionPending: BigInt! # uint128
   prev: BigInt! # uint128
   next: BigInt! # uint128
+  # accrual info
+  accrued: BigInt # uint128
+  accrualRate: BigInt # uint64
+  accrualTimestamp: BigInt # uint64
   # for calculating apr and net earnings
   principalWeightedDuration: BigInt! # uint128
   interestWeightedMaturity: BigInt! # uint128
+  # token instance, null if tick is not tokenized
+  token: CurrencyToken
 }
 
 ################################################################################
@@ -111,19 +124,36 @@ type Deposit @entity {
   account: Bytes! # address
   shares: BigInt! # uint128
   depositedAmount: BigInt! # increases on Deposited events and decreases on Withdrawn ones
-  redemptionPending: BigInt! # uint128
-  redemptionIndex: BigInt! # uint128
-  redemptionTarget: BigInt! # uint128
   updatedAt: BigInt! # uint64 (seconds since epoch)
   createdAt: BigInt! # uint64 (seconds since epoch)
+  redemptions: [Redemption!]! @derivedFrom(field: "deposit")
+}
+
+type Redemption @entity {
+  id: Bytes! # <deposit it><redemption id>
+  redemptionId: BigInt! # uint128
+  deposit: Deposit!
+  shares: BigInt! # uint256
 }
 
 ################################################################################
-# Bundle Entity
+# Bundle Entity (for BundleCollateralWrapper)
 ################################################################################
 
 type Bundle @entity {
   id: ID! # bundle token id
+  owner: Bytes! # address
+  collateralWrapperContext: Bytes!
+  underlyingCollateralTokenAddress: Bytes!
+  underlyingCollateralTokenIds: [BigInt!]! # uint256[]
+}
+
+################################################################################
+# Batch Entity (for ERC1155CollateralWrapper)
+################################################################################
+
+type Batch @entity {
+  id: ID! # Batch token id
   owner: Bytes! # address
   collateralWrapperContext: Bytes!
   underlyingCollateralTokenAddress: Bytes!
@@ -147,19 +177,25 @@ type Loan @entity {
   status: LoanStatus!
   transactionHash: Bytes!
   timestamp: BigInt! # uint64 (in seconds since epoch)
+  completion: BigInt # uint64 (in seconds since epoch)
   bundle: Bundle # set only if this is a bundle loan
+  batch: Batch # set only if this is a batch loan
   delegate: Bytes # address
+  delegateV2: Bytes # address
   # Decoded Loan Receipt
   borrower: Bytes! # address
   maturity: BigInt! # uint64 (in seconds since epoch)
   duration: BigInt! # uint64 (in seconds)
-  collateralToken: CollateralToken! # in case of a bundle/note, this will still refer to the underlying collateral token
-  collateralTokenIds: [BigInt!]! # uint256[] (in case of a bundle/note, this will still refer to the underlying collateral token ids)
+  collateralToken: CollateralToken! # (Underlying collateral token)
+  collateralTokenIds: [BigInt!]! # uint256[] (Underlying collateral token IDs)
+  collateralWrapperToken: Bytes # address (Collateral wrapper token, if wrapped)
+  collateralWrapperTokenId: BigInt # uint256 (Collateral wrapper token ID, if wrapped)
   ticks: [BigInt!]! # uint128[]
   useds: [BigInt!]! # uint128[]
   interests: [BigInt!]! # uint128[]
   principal: BigInt! # uint256
   repayment: BigInt! # uint256
+  adminFee: BigInt! # uint256
   proceeds: BigInt # uint256, if collateral is liquidated
   collateralWrapperContext: Bytes!
   # Raw Loan Receipt
@@ -186,6 +222,8 @@ type PoolEvent @entity(immutable: true) {
   deposited: Deposited
   redeemed: Redeemed
   withdrawn: Withdrawn
+  tokenCreated: TokenCreated
+  transferred: Transferred
 }
 
 enum PoolEventType {
@@ -196,6 +234,8 @@ enum PoolEventType {
   Deposited
   Redeemed
   Withdrawn
+  TokenCreated
+  Transferred
 }
 
 type LoanOriginated @entity(immutable: true) {
@@ -243,6 +283,22 @@ type Withdrawn @entity(immutable: true) {
   amount: BigInt! # uint256
 }
 
+type TokenCreated @entity(immutable: true) {
+  id: Bytes! # <pool><tx hash>
+  tick: Tick!
+  token: CurrencyToken!
+}
+
+type Transferred @entity(immutable: true) {
+  id: Bytes! # <pool><tx hash>
+  tick: Tick!
+  token: CurrencyToken!
+  shares: BigInt! # uint256
+  estimatedAmount: BigInt! # uint256
+  from: Bytes! # address
+  to: Bytes! # address
+}
+
 ################################################################################
 # Auction Entities
 ################################################################################
@@ -268,6 +324,7 @@ type Auction @entity {
   collateralToken: CollateralToken
   currencyToken: CurrencyToken!
   collateralTokenId: BigInt! # uint256
+  quantity: BigInt!
   highestBid: Bid
   bidsCount: Int!
   endTime: BigInt! # uint64

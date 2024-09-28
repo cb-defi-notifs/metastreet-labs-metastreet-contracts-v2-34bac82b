@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.25;
 
 import "../../rates/WeightedInterestRateModel.sol";
 
@@ -12,33 +12,30 @@ contract TestWeightedInterestRateModel is WeightedInterestRateModel {
     /* Constructor */
     /**************************************************************************/
 
-    constructor(WeightedInterestRateModel.Parameters memory parameters) WeightedInterestRateModel(parameters) {}
+    constructor() WeightedInterestRateModel() {}
 
     /**************************************************************************/
     /* Wrapper for Primary API */
     /**************************************************************************/
 
     /**
-     * @dev External wrapper function for _rate()
+     * @dev External wrapper for _price()
      */
-    function rate(
-        uint256 amount,
+    function price(
+        uint256 principal,
+        uint64 duration,
+        LiquidityLogic.NodeSource[] memory nodes,
+        uint16 count,
         uint64[] memory rates,
-        ILiquidity.NodeSource[] memory nodes,
-        uint16 count
-    ) external pure returns (uint256) {
-        return _rate(amount, rates, nodes, count);
-    }
+        uint32 adminFeeRate
+    ) external pure returns (uint256, uint256, uint128[] memory) {
+        (uint256 repayment, uint256 adminFee) = _price(principal, duration, nodes, count, rates, adminFeeRate);
 
-    /**
-     * @dev External wrapper function for _distribute()
-     */
-    function distribute(
-        uint256 amount,
-        uint256 interest,
-        ILiquidity.NodeSource[] memory nodes,
-        uint16 count
-    ) external view returns (uint128[] memory) {
-        return _distribute(amount, interest, nodes, count);
+        uint128[] memory pending = new uint128[](count);
+        for (uint256 i; i < count; i++) {
+            pending[i] = nodes[i].pending;
+        }
+
+        return (repayment, adminFee, pending);
     }
 }

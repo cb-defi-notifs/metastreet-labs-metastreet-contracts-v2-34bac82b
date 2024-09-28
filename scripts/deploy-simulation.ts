@@ -1,5 +1,6 @@
 import { ethers } from "hardhat";
 
+import { getContractFactoryWithLibraries } from "../test/helpers/Deploy";
 import { FixedPoint } from "../test/helpers/FixedPoint";
 import { extractEvent } from "../test/helpers/EventUtilities";
 
@@ -13,11 +14,16 @@ async function main() {
   const ERC1967Proxy = await ethers.getContractFactory("ERC1967Proxy", accounts[9]);
   const BundleCollateralWrapper = await ethers.getContractFactory("BundleCollateralWrapper", accounts[9]);
   const ExternalCollateralLiquidator = await ethers.getContractFactory("ExternalCollateralLiquidator", accounts[9]);
-  const Pool = await ethers.getContractFactory("WeightedRateCollectionPool", accounts[9]);
+  const ERC20DepositTokenImplementation = await ethers.getContractFactory("ERC20DepositTokenImplementation");
+  const Pool = await getContractFactoryWithLibraries(
+    "WeightedRateCollectionPool",
+    ["LiquidityLogic", "DepositLogic", "ERC20DepositTokenFactory"],
+    accounts[9]
+  );
   const PoolFactory = await ethers.getContractFactory("PoolFactory", accounts[9]);
 
   /* Deploy WETH */
-  const wethTokenContract = await TestERC20.deploy("WETH", "WETH", 18, ethers.utils.parseEther("1000000"));
+  const wethTokenContract = await TestERC20.deploy("WETH", "WETH", 18, ethers.parseEther("1000000"));
   await wethTokenContract.deployed();
   console.log("WETH ERC20 Contract:        ", wethTokenContract.address);
 
@@ -50,12 +56,17 @@ async function main() {
 
   console.log("");
 
+  /* Deploy ERC20 Deposit Token Implementation */
+  const erc20DepositTokenImplementation = await ERC20DepositTokenImplementation.deploy();
+  await erc20DepositTokenImplementation.deployed();
+
   /* Deploy Pool implementation */
   const poolImpl = await Pool.deploy(
     externalCollateralLiquidatorProxy.address,
     ethers.constants.AddressZero,
+    erc20DepositTokenImplementation.address,
     [bundleCollateralWrapper.address],
-    [FixedPoint.from("0.05"), FixedPoint.from("2.0")]
+    [FixedPoint.from("2.0")]
   );
   await poolImpl.deployed();
   console.log("Pool Implementation:        ", poolImpl.address);
@@ -73,7 +84,10 @@ async function main() {
     poolFactoryImpl.interface.encodeFunctionData("initialize")
   );
   await poolFactoryProxy.deployed();
-  const poolFactory = (await ethers.getContractAt("PoolFactory", poolFactoryProxy.address)) as PoolFactory;
+  const poolFactory = (await ethers.getContractAt("PoolFactory", poolFactoryProxy.address, accounts[9])) as PoolFactory;
+
+  /* Add Pool implementation */
+  await poolFactory.addPoolImplementation(poolImpl.address);
 
   console.log("Pool Factory:               ", poolFactory.address);
 
@@ -81,11 +95,11 @@ async function main() {
 
   /* Create WETH Pool */
   const params = ethers.utils.defaultAbiCoder.encode(
-    ["address", "address", "uint64[]", "uint64[]"],
+    ["address[]", "address", "uint64[]", "uint64[]"],
     [
-      baycTokenContract.address,
+      [baycTokenContract.address],
       wethTokenContract.address,
-      [7 * 86400, 14 * 86400, 30 * 86400],
+      [30 * 86400, 14 * 86400, 7 * 86400],
       [FixedPoint.normalizeRate("0.10"), FixedPoint.normalizeRate("0.30"), FixedPoint.normalizeRate("0.50")],
     ]
   );
@@ -101,10 +115,10 @@ async function main() {
   console.log("Depositer 2 is   account #3 (%s)", accounts[3].address);
   console.log("");
 
-  await wethTokenContract.transfer(accounts[0].address, ethers.utils.parseEther("1000"));
-  await wethTokenContract.transfer(accounts[1].address, ethers.utils.parseEther("1000"));
-  await wethTokenContract.transfer(accounts[2].address, ethers.utils.parseEther("1000"));
-  await wethTokenContract.transfer(accounts[3].address, ethers.utils.parseEther("1000"));
+  await wethTokenContract.transfer(accounts[0].address, ethers.parseEther("1000"));
+  await wethTokenContract.transfer(accounts[1].address, ethers.parseEther("1000"));
+  await wethTokenContract.transfer(accounts[2].address, ethers.parseEther("1000"));
+  await wethTokenContract.transfer(accounts[3].address, ethers.parseEther("1000"));
   console.log("Transferred 1000 WETH to account #0, #1, #2, #3");
 
   await baycTokenContract.mint(accounts[1].address, 123);

@@ -7,25 +7,16 @@ import { FixedPoint } from "../helpers/FixedPoint";
 import { Tick } from "../helpers/Tick";
 
 describe("WeightedInterestRateModel", function () {
-  const PARAMETERS_1 = [FixedPoint.from("0") /* tick threshold: 0 */, FixedPoint.from("2") /* tick exp base: 2.0 */];
-  const PARAMETERS_2 = [
-    FixedPoint.from("0.05") /* tick threshold: 0.05 */,
-    FixedPoint.from("1.5") /* tick exp base: 1.5 */,
-  ];
   const RATES = [FixedPoint.normalizeRate("0.10"), FixedPoint.normalizeRate("0.30"), FixedPoint.normalizeRate("0.50")];
 
-  let interestRateModel1: WeightedInterestRateModel;
-  let interestRateModel2: WeightedInterestRateModel;
+  let interestRateModel: WeightedInterestRateModel;
   let snapshotId: string;
 
   before("deploy fixture", async () => {
     const weightedInterestRateModelFactory = await ethers.getContractFactory("TestWeightedInterestRateModel");
 
-    interestRateModel1 = await weightedInterestRateModelFactory.deploy(PARAMETERS_1);
-    await interestRateModel1.deployed();
-
-    interestRateModel2 = await weightedInterestRateModelFactory.deploy(PARAMETERS_2);
-    await interestRateModel2.deployed();
+    interestRateModel = await weightedInterestRateModelFactory.deploy();
+    await interestRateModel.waitForDeployment();
   });
 
   beforeEach("snapshot blockchain", async () => {
@@ -42,10 +33,10 @@ describe("WeightedInterestRateModel", function () {
 
   describe("constants", async function () {
     it("matches expected name", async function () {
-      expect(await interestRateModel1.INTEREST_RATE_MODEL_NAME()).to.equal("WeightedInterestRateModel");
+      expect(await interestRateModel.INTEREST_RATE_MODEL_NAME()).to.equal("WeightedInterestRateModel");
     });
     it("matches expected implementation version", async function () {
-      expect(await interestRateModel1.INTEREST_RATE_MODEL_VERSION()).to.equal("1.0");
+      expect(await interestRateModel.INTEREST_RATE_MODEL_VERSION()).to.equal("2.0");
     });
   });
 
@@ -53,188 +44,242 @@ describe("WeightedInterestRateModel", function () {
   /* Primary API */
   /****************************************************************************/
 
-  const sources1 = [
+  const nodes1 = [
     {
       tick: Tick.encode("15", 0, 0),
       used: FixedPoint.from("10"),
+      pending: 0n,
     },
   ];
 
-  const sources4 = [
+  const nodes4 = [
     {
       tick: Tick.encode("1", 0, 0),
       used: FixedPoint.from("1"),
+      pending: 0n,
     },
     {
       tick: Tick.encode("5", 0, 0),
       used: FixedPoint.from("4"),
+      pending: 0n,
     },
     {
-      tick: Tick.encode("10", 0, 0),
+      tick: Tick.encode("10", 0, 1),
       used: FixedPoint.from("5"),
+      pending: 0n,
     },
     {
-      tick: Tick.encode("15", 0, 0),
+      tick: Tick.encode("15", 0, 2),
       used: FixedPoint.from("2"),
+      pending: 0n,
     },
   ];
 
-  const sources5 = [
+  const nodes5 = [
     {
       tick: Tick.encode("1", 0, 0),
       used: FixedPoint.from("1"),
+      pending: 0n,
     },
     {
       tick: Tick.encode("5", 0, 0),
       used: FixedPoint.from("4"),
+      pending: 0n,
     },
     {
-      tick: Tick.encode("10", 0, 0),
+      tick: Tick.encode("10", 0, 1),
       used: FixedPoint.from("5"),
+      pending: 0n,
     },
     {
-      tick: Tick.encode("12", 0, 0),
-      used: 10,
+      tick: Tick.encode("12", 0, 2),
+      used: BigInt(10),
+      pending: 0n,
     },
     {
-      tick: Tick.encode("15", 0, 0),
+      tick: Tick.encode("15", 0, 2),
       used: FixedPoint.from("2"),
+      pending: 0n,
     },
   ];
 
-  describe("#rate", async function () {
-    it("returns correct rate", async function () {
-      expect(
-        await interestRateModel1.rate(
-          FixedPoint.from("10"),
-          RATES,
-          [
-            {
-              tick: Tick.encode("5", 0, 0),
-              used: FixedPoint.from("5"),
-            },
-            {
-              tick: Tick.encode("10", 0, 0),
-              used: FixedPoint.from("2.5"),
-            },
-            {
-              tick: Tick.encode("20", 0, 0),
-              used: FixedPoint.from("2.5"),
-            },
-          ],
-          3
-        )
-      ).to.be.closeTo(FixedPoint.normalizeRate("0.10"), 1);
+  const nodes6 = [
+    {
+      tick: Tick.encode("15", 0, 2),
+      used: FixedPoint.from("10"),
+      pending: 0n,
+    },
+    {
+      tick: Tick.encode("20", 0, 0),
+      used: FixedPoint.from("0.0001"),
+      pending: 0n,
+    },
+    {
+      tick: Tick.encode("25", 0, 0),
+      used: FixedPoint.from("0.0001"),
+      pending: 0n,
+    },
+    {
+      tick: Tick.encode("30", 0, 0),
+      used: FixedPoint.from("0.0001"),
+      pending: 0n,
+    },
+    {
+      tick: Tick.encode("35", 0, 0),
+      used: FixedPoint.from("0.0001"),
+      pending: 0n,
+    },
+    {
+      tick: Tick.encode("40", 0, 0),
+      used: FixedPoint.from("0.0001"),
+      pending: 0n,
+    },
+  ];
 
-      expect(
-        await interestRateModel1.rate(
-          FixedPoint.from("10"),
-          RATES,
-          [
-            {
-              tick: Tick.encode("5", 0, 2),
-              used: FixedPoint.from("5"),
-            },
-            {
-              tick: Tick.encode("10", 0, 2),
-              used: FixedPoint.from("2.5"),
-            },
-            {
-              tick: Tick.encode("20", 0, 2),
-              used: FixedPoint.from("2.5"),
-            },
-          ],
-          3
-        )
-      ).to.be.closeTo(FixedPoint.normalizeRate("0.50"), 1);
+  describe("#price", async function () {
+    it("prices interest to one node", async function () {
+      const principal = nodes1.reduce((acc, n) => acc + n.used, 0n);
+      const interest = (FixedPoint.normalizeRate("0.10") * (30n * 86400n) * principal) / ethers.WeiPerEther;
 
-      expect(
-        await interestRateModel1.rate(
-          FixedPoint.from("10"),
-          RATES,
-          [
-            {
-              tick: Tick.encode("5", 0, 0),
-              used: FixedPoint.from("5"),
-            },
-            {
-              tick: Tick.encode("10", 0, 1),
-              used: FixedPoint.from("2.5"),
-            },
-            {
-              tick: Tick.encode("20", 0, 2),
-              used: FixedPoint.from("2.5"),
-            },
-          ],
-          3
-        )
-      ).to.be.closeTo(FixedPoint.normalizeRate("0.25"), 1);
-    });
-  });
-
-  describe("#distribute (base 2)", async function () {
-    it("distributes interest to one node", async function () {
-      const pending = await interestRateModel1.distribute(
-        FixedPoint.from("10"),
-        FixedPoint.from("3"),
-        sources1,
-        sources1.length
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        30 * 86400,
+        nodes1,
+        nodes1.length,
+        RATES,
+        0
       );
+
+      expect(repayment).to.equal(principal + interest);
+      expect(adminFee).to.equal(0n);
       expect(pending.length).to.equal(1);
-      expect(pending[0]).to.equal(FixedPoint.from("3"));
+      expect(pending[0]).to.equal(nodes1[0].used + FixedPoint.from("0.082191780812160000"));
     });
-    it("distributes interest to four nodes", async function () {
-      const pending = await interestRateModel1.distribute(
-        FixedPoint.from("12"),
-        FixedPoint.from("2"),
-        sources4,
-        sources4.length
+    it("prices interest to four nodes", async function () {
+      const principal = nodes4.reduce((acc, n) => acc + n.used, 0n);
+      const interest = nodes4.reduce(
+        (acc, n) => acc + (n.used * RATES[Tick.decode(n.tick).rateIndex] * (30n * 86400n)) / ethers.WeiPerEther,
+        0n
       );
-      expect(pending.length).to.equal(4);
-      expect(pending[0]).to.equal(FixedPoint.from("0.044444444444444444"));
-      expect(pending[1]).to.equal(FixedPoint.from("0.355555555555555552"));
-      expect(pending[2]).to.equal(FixedPoint.from("0.888888888888888890"));
-      expect(pending[3]).to.equal(FixedPoint.from("0.711111111111111114"));
-    });
-  });
 
-  describe("#distribute (base 1.5, threshold 0.05)", async function () {
-    it("distributes interest to one node", async function () {
-      const pending = await interestRateModel2.distribute(
-        FixedPoint.from("10"),
-        FixedPoint.from("3"),
-        sources1,
-        sources1.length
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        30 * 86400,
+        nodes4,
+        nodes4.length,
+        RATES,
+        0
       );
-      expect(pending.length).to.equal(1);
-      expect(pending[0]).to.equal(FixedPoint.from("3"));
-    });
-    it("distributes interest to four nodes", async function () {
-      const pending = await interestRateModel2.distribute(
-        FixedPoint.from("12"),
-        FixedPoint.from("2"),
-        sources4,
-        sources4.length
-      );
+
+      expect(repayment).to.equal(principal + interest);
+      expect(adminFee).to.equal(0n);
       expect(pending.length).to.equal(4);
-      expect(pending[0]).to.equal(FixedPoint.from("0.079999999999999999"));
-      expect(pending[1]).to.equal(FixedPoint.from("0.480000000000000000"));
-      expect(pending[2]).to.equal(FixedPoint.from("0.900000000000000001"));
-      expect(pending[3]).to.equal(FixedPoint.from("0.540000000000000000"));
+      expect(pending[0]).to.equal(nodes4[0].used + FixedPoint.from("0.002533782213967835"));
+      expect(pending[1]).to.equal(nodes4[1].used + FixedPoint.from("0.050675644279356660"));
+      expect(pending[2]).to.equal(nodes4[2].used + FixedPoint.from("0.129804324682933386"));
+      expect(pending[3]).to.equal(nodes4[3].used + FixedPoint.from("0.063561591278366119"));
     });
-    it("distributes interest to five nodes with one dust node", async function () {
-      const pending = await interestRateModel2.distribute(
-        FixedPoint.from("12"),
-        FixedPoint.from("2"),
-        sources5,
-        sources5.length
+    it("prices interest to four nodes with admin fee", async function () {
+      const principal = nodes4.reduce((acc, n) => acc + n.used, 0n);
+      const interest = nodes4.reduce(
+        (acc, n) => acc + (n.used * RATES[Tick.decode(n.tick).rateIndex] * (30n * 86400n)) / ethers.WeiPerEther,
+        0n
       );
+
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        30 * 86400,
+        nodes4,
+        nodes4.length,
+        RATES,
+        500
+      );
+
+      expect(repayment).to.equal(principal + interest);
+      expect(adminFee).to.equal((interest * 500n) / 10000n);
+      expect(pending.length).to.equal(4);
+      expect(pending[0]).to.equal(nodes4[0].used + FixedPoint.from("0.002407093103269444"));
+      expect(pending[1]).to.equal(nodes4[1].used + FixedPoint.from("0.048141862065388827"));
+      expect(pending[2]).to.equal(nodes4[2].used + FixedPoint.from("0.123314108448786716"));
+      expect(pending[3]).to.equal(nodes4[3].used + FixedPoint.from("0.060383511714447813"));
+    });
+    it("prices interest to five nodes with one dust node", async function () {
+      const principal = nodes5.reduce((acc, n) => acc + n.used, 0n);
+      const interest = nodes5.reduce(
+        (acc, n) => acc + (n.used * RATES[Tick.decode(n.tick).rateIndex] * (30n * 86400n)) / ethers.WeiPerEther,
+        0n
+      );
+
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        30 * 86400,
+        nodes5,
+        nodes5.length,
+        RATES,
+        0
+      );
+
+      expect(repayment).to.equal(principal + interest);
+      expect(adminFee).to.equal(0n);
       expect(pending.length).to.equal(5);
-      expect(pending[0]).to.equal(FixedPoint.from("0.079999999999999999"));
-      expect(pending[1]).to.equal(FixedPoint.from("0.480000000000000000"));
-      expect(pending[2]).to.equal(FixedPoint.from("0.900000000000000001"));
-      expect(pending[3]).to.equal(ethers.constants.Zero);
-      expect(pending[4]).to.equal(FixedPoint.from("0.540000000000000000"));
+      expect(pending[0]).to.equal(nodes5[0].used + FixedPoint.from("0.002533782213967835"));
+      expect(pending[1]).to.equal(nodes5[1].used + FixedPoint.from("0.050675644279356660"));
+      expect(pending[2]).to.equal(nodes5[2].used + FixedPoint.from("0.129804324682933386"));
+      expect(pending[3]).to.equal(nodes5[3].used);
+      expect(pending[4]).to.equal(nodes5[4].used + FixedPoint.from("0.063561591278366119"));
+    });
+    it("prices interest to six nodes with five small deposit nodes", async function () {
+      const principal = nodes6.reduce((acc, n) => acc + n.used, 0n);
+      const interest = nodes6.reduce(
+        (acc, n) => acc + (n.used * RATES[Tick.decode(n.tick).rateIndex] * (30n * 86400n)) / ethers.WeiPerEther,
+        0n
+      );
+
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        30 * 86400,
+        nodes6,
+        nodes6.length,
+        RATES,
+        0
+      );
+
+      expect(repayment).to.equal(principal + interest);
+      expect(adminFee).to.equal(0n);
+      expect(pending.length).to.equal(6);
+      expect(pending[0]).to.equal(nodes6[0].used + FixedPoint.from("0.410943114799472367"));
+      expect(pending[1]).to.equal(nodes6[1].used + FixedPoint.from("0.000003979698177924"));
+      expect(pending[2]).to.equal(nodes6[2].used + FixedPoint.from("0.000003979736717786"));
+      expect(pending[3]).to.equal(nodes6[3].used + FixedPoint.from("0.000003979775257648"));
+      expect(pending[4]).to.equal(nodes6[4].used + FixedPoint.from("0.000003979813797509"));
+      expect(pending[5]).to.equal(nodes6[5].used + FixedPoint.from("0.000003979852337371"));
+    });
+    it("prices interest to four nodes with admin fee and zero duration", async function () {
+      const principal = nodes4.reduce((acc, n) => acc + n.used, 0n);
+
+      const [repayment, adminFee, pending] = await interestRateModel.price(
+        principal,
+        0,
+        nodes4,
+        nodes4.length,
+        RATES,
+        500
+      );
+
+      expect(repayment).to.equal(principal);
+      expect(adminFee).to.equal(0n);
+      expect(pending.length).to.equal(4);
+      expect(pending[0]).to.equal(nodes4[0].used);
+      expect(pending[1]).to.equal(nodes4[1].used);
+      expect(pending[2]).to.equal(nodes4[2].used);
+      expect(pending[3]).to.equal(nodes4[3].used);
+    });
+    it("prices interest to four nodes with admin fee and zero principal", async function () {
+      const [repayment, adminFee, pending] = await interestRateModel.price(0, 30 * 86400, nodes4, 0, RATES, 500);
+
+      expect(repayment).to.equal(0n);
+      expect(adminFee).to.equal(0n);
+      expect(pending.length).to.equal(0);
     });
   });
 });
