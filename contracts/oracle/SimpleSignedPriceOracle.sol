@@ -129,11 +129,11 @@ contract SimpleSignedPriceOracle is Ownable2Step, EIP712, IPriceOracle {
     /**
      * @notice Initializer
      */
-    function initialize() external {
+    function initialize(address owner) external {
         require(!_initialized, "Already initialized");
 
         _initialized = true;
-        _transferOwnership(msg.sender);
+        _transferOwnership(owner);
     }
 
     /**************************************************************************/
