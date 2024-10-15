@@ -1,3 +1,7 @@
+* SimpleSignedPriceOracle v1.3 - 10/14/2024
+    * Add `owner` parameter to `initialize()`.
+    * Add `DOMAIN_VERSION()` getter.
+
 * Pool v2.15 - 09/09/2024
     * Factor out collateral transfer and liquidation logic.
     * Make `supportsInterface()` virtual.
