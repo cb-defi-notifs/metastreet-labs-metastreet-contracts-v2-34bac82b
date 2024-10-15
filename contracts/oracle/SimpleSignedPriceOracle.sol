@@ -117,7 +117,7 @@ contract SimpleSignedPriceOracle is Ownable2Step, EIP712, IPriceOracle {
      * @notice Simple Signed Price Oracle constructor
      * @param name_ Domain separator name
      */
-    constructor(string memory name_) EIP712(name_, IMPLEMENTATION_VERSION()) {
+    constructor(string memory name_) EIP712(name_, DOMAIN_VERSION()) {
         /* Disable initialization of implementation contract */
         _initialized = true;
     }
@@ -197,6 +197,14 @@ contract SimpleSignedPriceOracle is Ownable2Step, EIP712, IPriceOracle {
      * @return Price oracle implementation version
      */
     function IMPLEMENTATION_VERSION() public pure returns (string memory) {
+        return "1.2";
+    }
+
+    /**
+     * @notice Get signing domain version
+     * @return Signing domain version
+     */
+    function DOMAIN_VERSION() public pure returns (string memory) {
         return "1.2";
     }
 
