@@ -1,3 +1,6 @@
+* ERC1155CollateralWrapper v1.2 - 11/08/2024
+    * Add `nonce()` getter.
+
 * SimpleSignedPriceOracle v1.3 - 10/14/2024
     * Add `owner` parameter to `initialize()`.
     * Add `DOMAIN_VERSION()` getter.
