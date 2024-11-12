@@ -733,7 +733,7 @@ export function handleTokenCreated(event: TokenCreatedEvent): void {
     currencyTokenEntity.symbol = tokenSymbol.reverted ? "???" : tokenSymbol.value;
 
     const tokenDecimals = tokenContract.try_decimals();
-    currencyTokenEntity.decimals = tokenSymbol.reverted ? 18 : tokenDecimals.value;
+    currencyTokenEntity.decimals = tokenDecimals.reverted ? 18 : tokenDecimals.value;
 
     currencyTokenEntity.save();
 
