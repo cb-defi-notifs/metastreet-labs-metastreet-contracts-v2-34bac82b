@@ -75,6 +75,10 @@ const config: HardhatUserConfig = {
       url: process.env.BASE_URL || "",
       ...accountsConfig,
     },
+    arbitrum: {
+      url: process.env.ARBITRUM_URL || "",
+      ...accountsConfig,
+    },
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY,
