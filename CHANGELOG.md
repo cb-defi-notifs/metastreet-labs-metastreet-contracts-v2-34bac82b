@@ -1,3 +1,6 @@
+* BundleCollateralWrapper v2.2 - 12/18/2024
+    * Make maximum bundle size overrideable.
+
 * ERC1155CollateralWrapper v1.2 - 11/08/2024
     * Add `nonce()` getter.
 
