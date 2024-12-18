@@ -21,11 +21,6 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
      */
     string public constant IMPLEMENTATION_VERSION = "2.1";
 
-    /**
-     * @notice Maximum bundle size
-     */
-    uint256 internal constant MAX_BUNDLE_SIZE = 32;
-
     /**************************************************************************/
     /* Errors */
     /**************************************************************************/
@@ -184,6 +179,13 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
     /**************************************************************************/
 
     /**
+     * @dev Maximum bundle size
+     */
+    function MAX_BUNDLE_SIZE() public pure virtual returns (uint256) {
+        return 32;
+    }
+
+    /**
      * @dev Compute hash of encoded bundle
      * @param encodedBundle Encoded bundle
      * @return bundleTokenId Hash
@@ -209,7 +211,7 @@ contract BundleCollateralWrapper is ICollateralWrapper, ERC721, ReentrancyGuard 
      */
     function mint(address token, uint256[] calldata tokenIds) external nonReentrant returns (uint256) {
         /* Validate token IDs count */
-        if (tokenIds.length == 0 || tokenIds.length > MAX_BUNDLE_SIZE) revert InvalidSize();
+        if (tokenIds.length == 0 || tokenIds.length > MAX_BUNDLE_SIZE()) revert InvalidSize();
 
         /* Create encodedBundle */
         bytes memory encodedBundle = abi.encodePacked(token);
