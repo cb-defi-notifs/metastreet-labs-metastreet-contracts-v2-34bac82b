@@ -58,6 +58,28 @@ dataSources:
         - event: Transfer(indexed address,indexed address,indexed uint256)
           handler: handleTransfer
       file: src/bundleCollateralWrapper.ts
+  - kind: ethereum
+    name: ERC1155CollateralWrapper
+    network: arbitrum-one
+    source:
+      address: "0xD3954A8fCDF90Db6018CC2D0b96B77E88A749363"
+      abi: ERC1155CollateralWrapper
+      startBlock: 284508372
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.8
+      language: wasm/assemblyscript
+      entities:
+        - Batch
+      abis:
+        - name: ERC1155CollateralWrapper
+          file: ../artifacts/contracts/wrappers/ERC1155CollateralWrapper.sol/ERC1155CollateralWrapper.json
+      eventHandlers:
+        - event: BatchMinted(indexed uint256,indexed address,bytes)
+          handler: handleBatchMinted
+        - event: Transfer(indexed address,indexed address,indexed uint256)
+          handler: handleTransfer
+      file: src/erc1155CollateralWrapper.ts
   - kind: ethereum/contract
     name: EnglishAuctionCollateralLiquidatorV1
     network: arbitrum-one
