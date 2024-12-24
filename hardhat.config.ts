@@ -79,6 +79,10 @@ const config: HardhatUserConfig = {
       url: process.env.ARBITRUM_URL || "",
       ...accountsConfig,
     },
+    plume: {
+      url: process.env.PLUME_URL || "",
+      ...accountsConfig,
+    },
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY,
@@ -97,6 +101,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: "https://api.basescan.org/api",
           browserURL: "https://basescan.org",
+        },
+      },
+      {
+        network: "plume",
+        chainId: 98865,
+        urls: {
+          apiURL: "https://phoenix-explorer.plumenetwork.xyz/api\?",
+          browserURL: "https://phoenix-explorer.plumenetwork.xyz",
         },
       },
     ],
