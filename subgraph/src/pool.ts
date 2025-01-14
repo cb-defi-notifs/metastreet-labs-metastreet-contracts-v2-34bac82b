@@ -332,8 +332,11 @@ function updateDepositEntity(
   depositEntity.pool = poolAddress;
   depositEntity.tick = getTickId(encodedTick);
   depositEntity.account = account;
-  depositEntity.depositedAmount = depositEntity.depositedAmount.plus(depositedAmountUpdate);
   depositEntity.updatedAt = timestamp;
+
+  depositEntity.depositedAmount = depositEntity.depositedAmount.plus(depositedAmountUpdate);
+  if (depositEntity.depositedAmount.lt(ZERO)) depositEntity.depositedAmount = ZERO;
+
   depositEntity.save();
 
   return depositEntityId;
