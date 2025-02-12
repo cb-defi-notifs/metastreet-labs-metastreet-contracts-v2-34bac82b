@@ -1,3 +1,6 @@
+* NodePassCollectionCollateralFilter v1.0 - 02/12/2025
+    * Initial release.
+
 * BundleCollateralWrapper v2.2 - 12/18/2024
     * Make maximum bundle size overrideable.
 
